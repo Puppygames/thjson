@@ -53,16 +53,43 @@ bit is the addition of a class name before a map (maps are objects that are encl
 Essentially any value that is parsed as a string that then starts to define a map with the opening curly brace, becomes
 instead a class, of a type name which is the string so far. No whitespace is allowed in the type name unless it is quoted.
 
+We can do the same for arrays - define a class type for the array. We don't actually check that the elements themselves
+conform to the type - indeed we don't do anything with the class type name other than pass it to the stream listener:
+
+    inventory: item [sword, axe, shoes, tea, "no tea"]
+    
 The streaming parser presented here is pretty high-speed and generates almost no garbage. In fact it only even has to
 allocate any objects if you start using escapes in string data. It otherwise accepts UTF-8 data as a byte[] array, which
 can be in either Windows, *nix or Mac line ending format, and will fire off a streamed sequence of events to a listener
 pointing at subsections of the input array as tokens.
 
-In the git repository there's an example listener that converts the stream of tokens into a Google Json object.
+In the git repository there's an example listener that converts the stream of tokens into a Google Json object. Classes
+are converted into JSON objects by simply creating a property called "class":
 
-That's about it really.
+    "left_hand":{
+        "class":"sword",
+        "damage":3,
+        "weight":"1kg"
+    }
 
+Lists create an object of class "array" with a property "elements":
 
+    "inventory":{
+        "class":"array",
+        "elements":
+            [
+                "sword",
+                "axe",
+                "shoes",
+                "tea",
+                "no tea"
+            ]
+        }
 
+That's not the "definitive" way to do it but it's what the example listener does. That's about it really.
 
+Note that there isn't a complementary THJSON writer in this repository... the stream reader presented here is "lossy" in
+that it discards comments and whitespace. It probably wouldn't be too hard to create a writer. Maybe that's next.
+
+Cas :)
 
