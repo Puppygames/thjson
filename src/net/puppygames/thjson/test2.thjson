@@ -1,0 +1,80 @@
+{
+
+  # comments are useful
+  # specify rate in requests/second
+  "rate": 1000
+
+  // maybe you prefer js style comments
+  /* or if you feel old fashioned */
+
+  # key names do not need to be placed in quotes
+  key: "value"
+
+  # you don't need quotes for strings
+  text: look ma, no quotes!
+  
+  escapes: "Testing escapés\nLike a boss\tTabs too! \"Great\" isn't it"
+  
+  # Unicode escapes are valid but only inside quoted strings
+  unicodeEscapes: "Fingerspitzengef\u00FChl is a German term.\nIt\u2019s pronounced as follows: [\u02C8f\u026A\u014B\u0250\u02CC\u0283p\u026Ats\u0259n\u0261\u0259\u02CCfy\u02D0l]"
+
+  # note that for quoteless strings everything up
+  # to the next line is part of the string!
+  
+  numbersTest: [
+  	1,
+  	.1,
+  	+.1,
+  	-.1,
+  	1.0,
+  	+1,
+  	-1,
+  	+1.0,
+  	-1.0,
+  	+1.0e1,
+  	-1.0e1,
+  	+1.0e+1,
+  	+1.0e-1,
+  	.0e1,
+  	0x1234,
+  	%10101010
+  ]
+
+  # commas are optional
+  commas:
+  {
+    one: 1
+    two: 2
+  }
+
+  # trailing commas are allowed
+  trailing:
+  {
+    one: 1,
+    two: 2,
+  }
+
+  # This is a class called "clazz"
+  some_class_or_other:
+     clazz {
+	    one: 1,
+	    two: 2,
+     }
+     
+  spacesInClassNames: "are allowed" { because: "we're cool" }
+     
+  # It does typed arrays too
+  typedarray: int [1, 2, 3, 4]
+
+  # multiline string
+  haiku:
+    '''
+    JSON I love you.
+      But you strangle my expression.
+        This is so much better.
+    '''
+
+  # Obviously you can always use standard JSON syntax as well:
+  favNumbers: [ 1, 2, 3, 6, 42 ]
+}
+  

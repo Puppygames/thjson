@@ -1,0 +1,51 @@
+#thjson
+# Test comment
+// Test comment
+/* Test one line c-style comment */
+/* Test two line
+  c-style comment */
+     # Test leading whitespace
+     
+     
+# Test ignore blank lines too
+
+test:[1,2,{object:"test"}]
+
+ identifier: 123
+ "quoted_identifier": 456
+ identifier: "789"
+ "quoted_identifier":"abc"
+ identifier: def,
+ identifier: hij # ignore a comment
+ identifier: klm, # ignore a comment
+ identifier: "\nop", # ignore a comment
+ a:"1"
+ , 
+ b:2, bb:3
+ a:-123.456, b:+123.456
+ foo:true, bar: false, plugh:xyzzy, haha:haha
+ c: animation {
+ 	aardbark:1
+ 	zonkle:foot
+ 	poop: { // test
+ 		poopy: "poO"
+ 	}
+ },
+ x: clazz { z:y }
+ 
+ stringtest:
+		'''
+		So I'm testing a string
+	 		And it's got quotes
+	  			and everything
+		'''
+		
+arraytest: numbers [1,  arse [2, 3], 3, { object:"test" }
+4
+5
+6, 6
+"8,9",
+bugger [and, shrimp]
+]
+
+ 
