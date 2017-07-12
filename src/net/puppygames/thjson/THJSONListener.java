@@ -32,7 +32,7 @@ POSSIBILITY OF SUCH DAMAGE.
 package net.puppygames.thjson;
 
 /**
- * Listen to the stream of symbols coming in from {@link THJSON}
+ * Listen to the stream of symbols coming in from {@link THJSONReader}
  */
 public interface THJSONListener {
 

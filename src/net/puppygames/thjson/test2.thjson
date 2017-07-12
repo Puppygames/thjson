@@ -1,5 +1,14 @@
-{
 
+
+  spacesAndQuotesInClassNames: are_not_allowed { because: "we're cool" }
+     
+  # This is a class called "clazz"
+  some_class_or_other:
+     clazz {
+	    one: 1,
+	    two: 2,
+     }
+     
   # comments are useful
   # specify rate in requests/second
   "rate": 1000
@@ -11,7 +20,7 @@
   key: "value"
 
   # you don't need quotes for strings
-  text: look ma, no quotes!
+  text: look ma, \nno quotes!
   
   escapes: "Testing escapés\nLike a boss\tTabs too! \"Great\" isn't it"
   
@@ -54,15 +63,6 @@
     two: 2,
   }
 
-  # This is a class called "clazz"
-  some_class_or_other:
-     clazz {
-	    one: 1,
-	    two: 2,
-     }
-     
-  spacesInClassNames: "are allowed" { because: "we're cool" }
-     
   # It does typed arrays too
   typedarray: int [1, 2, 3, 4]
 
@@ -70,11 +70,10 @@
   haiku:
     '''
     JSON I love you.
-      But you strangle my expression.
+      But you "strangle" my expression.\t
         This is so much better.
     '''
 
   # Obviously you can always use standard JSON syntax as well:
   favNumbers: [ 1, 2, 3, 6, 42 ]
-}
   
