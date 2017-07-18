@@ -36,6 +36,9 @@
   # note that for quoteless strings everything up
   # to the next line is part of the string!
   
+  test:[@a, 
+  @b]
+  
   numbersTest: [
   	1,
   	@function test

@@ -336,7 +336,7 @@ public class THJSONtoMapConverter implements THJSONListener {
 	@Override
 	public String function(byte[] src, int start, int length) {
 		System.out.println("FUNCTION CALL:" + new String(src, start, length, StandardCharsets.UTF_8) + "<");
-		return "";
+		return new String(src, start, length, StandardCharsets.UTF_8).toUpperCase();
 	}
 
 }

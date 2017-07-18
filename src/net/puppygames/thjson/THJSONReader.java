@@ -704,6 +704,9 @@ public class THJSONReader {
 
 		if (c == '\n' || c == ',') {
 			endFunction = true;
+		} else if (c == '}' || c == ']') {
+			endFunction = true;
+			posd = -1;
 		} else if (c == '#') {
 			endFunction = true;
 			newState = this::readHashComment;
