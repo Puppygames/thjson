@@ -39,40 +39,42 @@ public interface THJSONListener {
 	default void begin() {
 	}
 
-	default void beginMap(byte[] src, int key, int keyLength) {
-		beginObject(src, key, keyLength, 0, 0);
-	}
-
-	default void beginObject(byte[] src, int key, int keyLength, int clazz, int clazzLength) {
-	}
-
-	default void endObject() {
-	}
-
-	default void endMap() {
-		endObject();
-	}
-
 	default void end() {
 	}
 
-	default void beginArray(byte[] src, int key, int keyLength) {
-		beginList(src, key, keyLength, 0, 0);
+	void beginMap(byte[] src, int key, int keyLength);
+
+	void beginMapValue(byte[] src);
+
+	void beginObject(byte[] src, int key, int keyLength, int clazz, int clazzLength);
+
+	void beginObjectValue(byte[] src, int clazz, int clazzLength);
+
+	void endObject();
+
+	void endMap();
+
+	void beginArray(byte[] src, int key, int keyLength);
+
+	void beginArrayValue(byte[] src);
+
+	void beginList(byte[] src, int key, int keyLength, int clazz, int clazzLength);
+
+	void beginListValue(byte[] src, int clazz, int clazzLength);
+
+	void endList();
+
+	void endArray();
+
+	void value(byte[] src, THJSONPrimitiveType type, int value, int valueLength);
+
+	void property(byte[] src, int key, int keyLength, byte[] valueSrc, THJSONPrimitiveType type, int value, int valueLength);
+
+	default void comment(byte[] src, int start, int length, THJSONCommentType type) {
 	}
 
-	default void beginList(byte[] src, int key, int keyLength, int clazz, int clazzLength) {
+	default void directive(byte[] src, int start, int length) {
 	}
 
-	default void endList() {
-	}
-
-	default void endArray() {
-	}
-
-	default void value(byte[] src, THJSONPrimitiveType type, int value, int valueLength) {
-	}
-
-	default void property(byte[] src, int key, int keyLength, byte[] valueSrc, THJSONPrimitiveType type, int value, int valueLength) {
-	}
-
+	String function(byte[] src, int start, int length);
 }

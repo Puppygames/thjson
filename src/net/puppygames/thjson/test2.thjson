@@ -1,11 +1,19 @@
+	
+	@include "some resource" # for sure
+	@include some other directive//with this
+	@include some other directive
 
+	float: .1
+  escapes: "Testing escapés\nLike a boss\tTabs too! \"Great\" isn't it"
+  
+	
 
   spacesAndQuotesInClassNames: are_not_allowed { because: "we're cool" }
      
   # This is a class called "clazz"
   some_class_or_other:
      clazz {
-	    one: 1,
+	    one: @reference# 12345
 	    two: 2,
      }
      
@@ -22,8 +30,6 @@
   # you don't need quotes for strings
   text: look ma, \nno quotes!
   
-  escapes: "Testing escapés\nLike a boss\tTabs too! \"Great\" isn't it"
-  
   # Unicode escapes are valid but only inside quoted strings
   unicodeEscapes: "Fingerspitzengef\u00FChl is a German term.\nIt\u2019s pronounced as follows: [\u02C8f\u026A\u014B\u0250\u02CC\u0283p\u026Ats\u0259n\u0261\u0259\u02CCfy\u02D0l]"
 
@@ -32,10 +38,11 @@
   
   numbersTest: [
   	1,
+  	@function test
   	.1,
   	+.1,
   	-.1,
-  	1.0,
+  	1.0, @test 3
   	+1,
   	-1,
   	+1.0,

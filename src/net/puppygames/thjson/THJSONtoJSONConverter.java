@@ -42,10 +42,9 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 
 /**
- * This will handily convert a THJSON stream into a {@link JsonObject} object instance.
- * Class objects will have a property, "class", set on them with the class name. Typed arrays are stored
- * as classes with class "array" and one property, "elements", which is the array as a JSON array. Untyped arrays are
- * simply stored as normal JSON arrays.
+ * This will handily convert a THJSON stream into a {@link JsonObject} object instance. Class objects will have a property, "class", set on them with the class
+ * name. Typed arrays are stored as classes with class "array" and one property, "elements", which is the array as a JSON array. Untyped arrays are simply
+ * stored as normal JSON arrays.
  */
 public class THJSONtoJSONConverter implements THJSONListener {
 
@@ -73,8 +72,8 @@ public class THJSONtoJSONConverter implements THJSONListener {
 	}
 
 	/**
-	 * Gets the {@link JsonObject} that we create from listening to a THJSON stream. If the parsing throws at any point, then the JsonObject thus returned
-	 * will only be partially complete.
+	 * Gets the {@link JsonObject} that we create from listening to a THJSON stream. If the parsing throws at any point, then the JsonObject thus returned will
+	 * only be partially complete.
 	 * @return the {@link JsonObject} thus created.
 	 */
 	public JsonObject getJson() {
@@ -85,20 +84,19 @@ public class THJSONtoJSONConverter implements THJSONListener {
 	public void beginObject(byte[] src, int key, int keyLength, int clazz, int clazzLength) {
 		stack.push(current);
 		JsonObject newCurrent = new JsonObject();
-		if (current instanceof JsonObject) {
-			String keyString = new String(src, key, keyLength, StandardCharsets.UTF_8);
-			((JsonObject) current).add(keyString, newCurrent);
-		} else {
-			((JsonArray) current).add(newCurrent);
-		}
+		String keyString = new String(src, key, keyLength, StandardCharsets.UTF_8);
+		((JsonObject) current).add(keyString, newCurrent);
 		current = newCurrent;
-		if (clazzLength != 0) {
-			newCurrent.addProperty("class", new String(src, clazz, clazzLength, StandardCharsets.UTF_8));
-		}
+		newCurrent.addProperty("class", new String(src, clazz, clazzLength, StandardCharsets.UTF_8));
 	}
 
 	@Override
 	public void endObject() {
+		current = stack.pop();
+	}
+
+	@Override
+	public void endMap() {
 		current = stack.pop();
 	}
 
@@ -128,7 +126,7 @@ public class THJSONtoJSONConverter implements THJSONListener {
 
 			@Override
 			public void onNull() {
-				((JsonObject) current).add(keyString, new JsonNull());
+				((JsonObject) current).add(keyString, JsonNull.INSTANCE);
 			}
 		});
 	}
@@ -202,7 +200,7 @@ public class THJSONtoJSONConverter implements THJSONListener {
 
 			@Override
 			public void onNull() {
-				((JsonArray) current).add(new JsonNull());
+				((JsonArray) current).add(JsonNull.INSTANCE);
 			}
 		});
 	}
@@ -211,12 +209,8 @@ public class THJSONtoJSONConverter implements THJSONListener {
 	public void beginArray(byte[] src, int key, int keyLength) {
 		stack.push(current);
 		JsonArray newCurrent = new JsonArray();
-		if (current instanceof JsonObject) {
-			String keyString = new String(src, key, keyLength, StandardCharsets.UTF_8);
-			((JsonObject) current).add(keyString, newCurrent);
-		} else {
-			((JsonArray) current).add(newCurrent);
-		}
+		String keyString = new String(src, key, keyLength, StandardCharsets.UTF_8);
+		((JsonObject) current).add(keyString, newCurrent);
 		current = newCurrent;
 	}
 
@@ -254,5 +248,73 @@ public class THJSONtoJSONConverter implements THJSONListener {
 	@Override
 	public void endArray() {
 		current = stack.pop();
+	}
+
+	@Override
+	public void beginArrayValue(byte[] src) {
+		stack.push(current);
+		JsonArray newCurrent = new JsonArray();
+		((JsonArray) current).add(newCurrent);
+		current = newCurrent;
+	}
+
+	@Override
+	public void beginListValue(byte[] src, int clazz, int clazzLength) {
+		stack.push(current);
+
+		// Create a special "array" object
+		JsonObject array = new JsonObject();
+		array.addProperty("class", "array");
+		String typeString = new String(src, clazz, clazzLength, StandardCharsets.UTF_8);
+		array.addProperty("type", typeString);
+		((JsonArray) current).add(array);
+
+		stack.push(array);
+
+		JsonArray elements = new JsonArray();
+		array.add("elements", elements);
+		current = elements;
+	}
+
+	@Override
+	public void beginMap(byte[] src, int key, int keyLength) {
+		stack.push(current);
+		JsonObject newCurrent = new JsonObject();
+		String keyString = new String(src, key, keyLength, StandardCharsets.UTF_8);
+		((JsonObject) current).add(keyString, newCurrent);
+		current = newCurrent;
+	}
+
+	@Override
+	public void beginMapValue(byte[] src) {
+		stack.push(current);
+		JsonObject newCurrent = new JsonObject();
+		((JsonArray) current).add(newCurrent);
+		current = newCurrent;
+	}
+
+	@Override
+	public void beginObjectValue(byte[] src, int clazz, int clazzLength) {
+		stack.push(current);
+		JsonObject newCurrent = new JsonObject();
+		((JsonArray) current).add(newCurrent);
+		current = newCurrent;
+		newCurrent.addProperty("class", new String(src, clazz, clazzLength, StandardCharsets.UTF_8));
+	}
+
+	@Override
+	public void comment(byte[] src, int start, int length, THJSONCommentType type) {
+		System.out.println("COMMENT:" + new String(src, start, length, StandardCharsets.UTF_8) + "<");
+	}
+
+	@Override
+	public void directive(byte[] src, int start, int length) {
+		System.out.println("DIRECTIVE:" + new String(src, start, length, StandardCharsets.UTF_8) + "<");
+	}
+
+	@Override
+	public String function(byte[] src, int start, int length) {
+		System.out.println("FUNCTION CALL:" + new String(src, start, length, StandardCharsets.UTF_8) + "<");
+		return "";
 	}
 }

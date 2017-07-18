@@ -36,16 +36,21 @@ import static java.nio.charset.StandardCharsets.*;
 import static java.util.Objects.*;
 import static net.puppygames.thjson.THJSONPrimitiveType.*;
 
+import java.awt.Toolkit;
+import java.awt.datatransfer.StringSelection;
 import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.StringWriter;
 import java.net.URL;
 import java.net.URLConnection;
-import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Stack;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import com.google.gson.stream.JsonWriter;
 
 /**
  * A streaming Tagged Human JSON reader
@@ -56,6 +61,9 @@ public class THJSONReader {
 	private static final byte[] TRUE_BYTES = "true".getBytes(UTF_8);
 	private static final byte[] FALSE_BYTES = "false".getBytes(UTF_8);
 	private static final byte[] HEX_LITERAL_BYTES = "0x".getBytes(UTF_8);
+
+	/** Assume a tab is this many spaces by default - used when reading triple quoted strings */
+	private static final int DEFAULT_TAB_SIZE = 4;
 
 	/**
 	 * Determines if the incoming character is whitespace
@@ -239,12 +247,24 @@ public class THJSONReader {
 
 	public static Map<String, Object> convertToMap(String resourceURL) throws IOException {
 		THJSONtoMapConverter converter = new THJSONtoMapConverter();
+		converter.setDebug(true);
 		readResource(resourceURL, converter);
 		return converter.getMap();
 	}
 
 	public static void main(String[] args) throws Exception {
-		System.out.println(convertToMap("test2.thjson"));
+		Map<String, Object> map = convertToMap("test2.thjson");
+		System.out.println(map);
+
+		JsonObject json = convertToJSON("test2.thjson");
+		StringWriter out = new StringWriter();
+		JsonWriter writer = new JsonWriter(out);
+		writer.setIndent("    ");
+		Gson gson = new Gson();
+		gson.toJson(json, writer);
+		writer.flush();
+		Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(out.getBuffer().toString()), null);
+		System.out.println(out.getBuffer().toString());
 	}
 
 	/** This reports the events */
@@ -271,26 +291,56 @@ public class THJSONReader {
 	/** New line next character */
 	private boolean newLineNext = false;
 
-	/** Current line length, reset when we get a \n */
-	private int linePos;
+	/** Alignment column for triple-quoted string */
+	private int align;
 
-	/** Whether we're done */
-	private boolean done;
+	/** Start of current token */
+	private int start;
 
-	/** Object depth */
-	private int objectDepth;
+	/** Key position */
+	private int keyStart, keyEnd;
 
-	/** Bracket depth */
-	private int bracketDepth;
+	/** Value position */
+	private int valueStart, valueEnd;
 
-	/** List depth */
-	private int listDepth;
+	/** Tab size */
+	private int tabSize = DEFAULT_TAB_SIZE;
 
-	/** Tag:start */
-	private int currentStart, currentEnd;
+	/** Whether we got a root brace */
+	private boolean hasRootBrace;
+
+	/** Whether we closed the root brace */
+	private boolean closedRootBrace;
+
+	private final Stack<Runnable> objectStack = new Stack<>();
+
+	private class AccessibleByteArrayOutputStream extends ByteArrayOutputStream {
+
+		AccessibleByteArrayOutputStream(int size) {
+			super(size);
+		}
+
+		byte[] getBuf() {
+			return buf;
+		}
+	}
+
+	/** Key source: used when escaping */
+	private AccessibleByteArrayOutputStream keySource;
+
+	/** Value source: used when escaping */
+	private AccessibleByteArrayOutputStream valueSource;
+
+	/** State */
+	private State state = this::readRoot;
+	private Stack<State> stack = new Stack<>();
+
+	private interface State {
+		void read(int c) throws IOException;
+	}
 
 	/** Temp byte array output */
-	private ByteArrayOutputStream baos;
+	private AccessibleByteArrayOutputStream baos;
 
 	/**
 	 * C'tor
@@ -316,319 +366,991 @@ public class THJSONReader {
 		this.length = length;
 
 		listener.begin();
-		read(ignoreWhitespace(), false, false, 0, 0);
+		parse();
 		listener.end();
 	}
 
 	/**
-	 * Ignore whitespace until we get non-whitespace
-	 * @return the first non-whitespace character
-	 * @throws IOException
+	 * Sets the tab size. This is used when working out indentation for triple quoted strings.
+	 * @param tabSize
 	 */
-	private int ignoreWhitespace() throws IOException {
-		int c = 0;
-		do {
-			c = read();
-			if (c == -1) {
-				done = true;
-				break;
-			}
-		} while (isWhitespace(c));
-		return c;
+	public void setTabSize(int tabSize) {
+		this.tabSize = tabSize;
 	}
 
 	/**
-	 * Ignore at most n spaces of whitespace
-	 * @return the first non-whitespace character
-	 * @throws IOException
+	 * Gets the tab size used when calculating indentations for triple quoted strings. Defaults to {@link #DEFAULT_TAB_SIZE}
+	 * @return tab size, in spaces
 	 */
-	private int ignoreAtMostWhitespace() throws IOException {
-		int c = 0;
-		do {
-			c = read();
-			if (c == -1) {
-				throw new IOException("Unexpected EOF reading triple quoted string on line on line " + line + ":" + col);
-			}
-			if (c == '\n') {
-				return c;
-			}
-			if (!isWhitespace(c)) {
-				return c;
-			}
-		} while (col < linePos);
-		return c;
+	public int getTabSize() {
+		return tabSize;
 	}
 
 	/**
-	 * The next character must be the start of a comment
-	 * @return the character we got
+	 * The incoming character is in UCS2 (16-bit) format; we will write it out to the temporarary baos buffer as a UTF8 sequence
+	 * @param c
 	 */
-	private int expectStartOfComment() throws IOException {
-		int c = read();
-		ensureStartOfComment(c);
-		return c;
-	}
-
-	/**
-	 * The next character must be the start of an identifier
-	 * @return the character we got
-	 */
-	private int expectStartOfIdentifier() throws IOException {
-		int c = read();
-		ensureStartOfIdentifier(c);
-		return c;
-	}
-
-	/**
-	 * The incoming character must be the start of a comment
-	 */
-	private void ensureStartOfComment(int c) throws IOException {
-		if (c == '/' || c == '*') {
-			return;
-		} else if (c == -1) {
-			throw new EOFException("Expected comment but got EOF on line " + line + ":" + col);
+	private void writeUTF8fromUCS2(int c, ByteArrayOutputStream out) {
+		if (c < 0x80) {
+			out.write(c);
+		} else if (c < 0x800) {
+			int byte1 = 0x80 | (c & 0x3F);
+			c >>= 6;
+			int byte0 = 0xC0 | c;
+			out.write(byte0);
+			out.write(byte1);
 		} else {
-			throw new IOException("Expected start of comment; got " + (char) c + " (0x" + Integer.toHexString(c) + ") on line " + line + ":" + col);
+			int byte2 = 0x80 | (c & 0x3F);
+			c >>= 6;
+			int byte1 = 0x80 | (c & 0x3F);
+			c >>= 6;
+			int byte0 = 0xE0 | c;
+			out.write(byte0);
+			out.write(byte1);
+			out.write(byte2);
 		}
 	}
 
-	/**
-	 * The incoming character must be the start of a identifier
-	 */
-	private void ensureStartOfIdentifier(int c) throws IOException {
-		//@formatter:off
-		if 	(
-				(c >= 'a' && c <= 'z')
-			|| 	(c >= 'A' && c <= 'Z')
-			||	c == '_'
-			)
-		//@formatter:on
-		{
-			return;
+	private void emitValue() {
+		byte[] vs = in;
+		if (valueSource != null) {
+			vs = valueSource.getBuf();
+			valueSource = null;
 		}
-		if (c == -1) {
-			throw new EOFException("Expected start of identifier but got EOF on line " + line + ":" + col);
+		if (valueEnd - valueStart < 0) {
+			throw new RuntimeException("Illegal value arguments: " + valueStart + ", " + valueEnd);
 		}
-		throw new IOException("Expected start of identifier; got " + (char) c + " (0x" + Integer.toHexString(c) + ") on line " + line + ":" + col);
+		listener.value(vs, determinePrimitiveType(vs, valueStart, valueEnd), valueStart, valueEnd - valueStart);
 	}
 
-	/**
-	 * The incoming character must be the rest of an identifier
-	 */
-	private void ensureRestOfIdentifier(int c) throws IOException {
-		//@formatter:off
-		if 	(
-				(c >= 'a' && c <= 'z')
-			|| 	(c >= 'A' && c <= 'Z')
-			|| 	(c >= '0' && c <= '9')
-			||	c == '_'
-			)
-		//@formatter:on
-		{
-			return;
+	private void emitStringValue() {
+		byte[] vs = in;
+		if (valueSource != null) {
+			vs = valueSource.getBuf();
+			valueSource = null;
 		}
-		if (c == -1) {
-			throw new EOFException("Expected rest of identifier but got EOF on line " + line + ":" + col);
+		if (valueEnd - valueStart < 1) {
+			throw new RuntimeException("Illegal value arguments: " + valueStart + ", " + valueEnd);
 		}
-		throw new IOException("Expected rest of identifier; got " + (char) c + " (0x" + Integer.toHexString(c) + ") on line " + line + ":" + col);
+		listener.value(vs, STRING, valueStart, valueEnd - valueStart);
 	}
 
-	/**
-	 * The incoming character must be the rest of a quoted identifier
-	 */
-	private void ensureRestOfQuotedIdentifier(int c) throws IOException {
-		//@formatter:off
-		if 	(
-				(c >= 'a' && c <= 'z')
-			|| 	(c >= 'A' && c <= 'Z')
-			|| 	(c >= '0' && c <= '9')
-			||	c == '_'
-			||	c == ' '
-			)
-		//@formatter:on
-		{
-			return;
+	private void emitProperty() {
+		byte[] ks = in;
+		if (keySource != null) {
+			ks = keySource.getBuf();
+			keySource = null;
 		}
-		if (c == -1) {
-			throw new EOFException("Expected rest of identifier but got EOF on line " + line + ":" + col);
+		byte[] vs = in;
+		if (valueSource != null) {
+			vs = valueSource.getBuf();
+			valueSource = null;
 		}
-		throw new IOException("Expected rest of identifier; got " + (char) c + " (0x" + Integer.toHexString(c) + ") on line " + line + ":" + col);
+		if (keyEnd - keyStart < 1) {
+			throw new RuntimeException("Illegal key arguments: " + keyStart + ", " + keyEnd);
+		}
+		if (valueEnd - valueStart < 0) {
+			throw new RuntimeException("Illegal value arguments: " + valueStart + ", " + valueEnd);
+		}
+		listener.property(ks, keyStart, keyEnd - keyStart, vs, determinePrimitiveType(vs, valueStart, valueEnd), valueStart, valueEnd - valueStart);
 	}
 
-	private void ignoreToEndOfLine() {
-		int c = 0;
-		do {
-			c = read();
-			if (c == -1) {
-				done = true;
-				return;
+	private void emitStringProperty() {
+		byte[] ks = in;
+		if (keySource != null) {
+			ks = keySource.getBuf();
+			keySource = null;
+		}
+		byte[] vs = in;
+		if (valueSource != null) {
+			vs = valueSource.getBuf();
+			valueSource = null;
+		}
+		if (keyEnd - keyStart < 1) {
+			throw new RuntimeException("Illegal key arguments: " + keyStart + ", " + keyEnd);
+		}
+		if (valueEnd - valueStart < 1) {
+			throw new RuntimeException("Illegal value arguments: " + valueStart + ", " + valueEnd);
+		}
+		listener.property(ks, keyStart, keyEnd - keyStart, vs, STRING, valueStart, valueEnd - valueStart);
+	}
+
+	private int trimLeadingWhitespace(int from) {
+		for (;;) {
+			int cc = in[from];
+			if (isWhitespace(cc)) {
+				from++;
+			} else {
+				return from;
 			}
-		} while (c != '\n');
+		}
+	}
+
+	private int trimTrailingWhitespace(int from, byte[] buf) {
+		for (;;) {
+			int cc = buf[from - 1];
+			if (isWhitespace(cc)) {
+				from--;
+			} else {
+				return from;
+			}
+		}
+	}
+
+	private int trimTrailingWhitespaceAndComma(int from, byte[] buf) {
+		for (;;) {
+			int cc = buf[from - 1];
+			if (cc == ',') {
+				from--;
+			} else if (isWhitespace(cc)) {
+				from--;
+			} else {
+				return from;
+			}
+		}
 	}
 
 	/**
-	 * Read up until an end of C-style comment
+	 * Read the next byte from the input.
+	 * @return an unsigned byte, or -1 if we've reached EOF
 	 * @throws IOException
 	 */
-	private void readToEndOfComment() throws IOException {
-		boolean gotStar = false;
-		while (!done) {
-			int c = read();
-			if (c == -1) {
-				throw new EOFException("Unexpected EOF when reading comment");
+	private int read() {
+		if (newLineNext) {
+			newLineNext = false;
+			line++;
+			col = 0;
+		}
+		if (pos == length) {
+			// EOF
+			return -1;
+		}
+		int c = in[pos++] & 0xFF;
+		if (c == '\r') {
+			// Turn into \n
+			c = '\n';
+			ignoreNextSlashN = true;
+			newLineNext = true;
+		} else if (c == '\n') {
+			if (ignoreNextSlashN) {
+				ignoreNextSlashN = false;
+				// Recurse
+				return read();
+			} else {
+				newLineNext = true;
 			}
-			if (gotStar) {
-				if (c == '/') {
-					// Comment ends
+		} else if (c == '\t') {
+			col += tabSize;
+			col -= col % tabSize;
+		} else {
+			col++;
+		}
+		// System.out.print((char) c);
+		return c;
+	}
+
+	/**
+	 * Peek at the n'th character ahead
+	 * @param n
+	 * @return the character or -1 if we peek past the end
+	 */
+	private int peek(int n) {
+		if (pos + n >= in.length) {
+			return -1;
+		} else {
+			return in[pos + n];
+		}
+	}
+
+	/**
+	 * Accept whitespace, comments, root braces, members
+	 */
+	private void readRoot(int c) throws IOException {
+		switch (c) {
+			case -1:
+				// End
+				if ((hasRootBrace && closedRootBrace) || !hasRootBrace) {
+					// Done
 					return;
 				} else {
-					// Reset and look for a star
-					gotStar = c == '*';
+					throw new IOException("Unexpected EOF at line " + line + ":" + col);
 				}
-			} else {
-				gotStar = c == '*';
-			}
-		}
-	}
-
-	private String getCurrentString() {
-		return new String(in, currentStart, currentEnd - currentStart, StandardCharsets.UTF_8);
-	}
-
-	private void readQuotedIdentifier() throws IOException {
-		currentStart = pos;
-		int c = expectStartOfIdentifier();
-		currentEnd = pos;
-		// Now read rest of identifier, ending on quotes
-		for (;;) {
-			c = read();
-			if (c == -1) {
-				throw new EOFException("EOF in middle of quoted identifier on line " + line + ":" + col);
-			}
-			if (c == '"') {
-				// Got it. Next character must be :
-				c = read();
-				if (c != ':') {
-					throw new IOException("Expected : after quoted identifer " + getCurrentString() + " on line " + line + ":" + col);
-				}
+			case ' ':
+			case '\t':
+			case '\n':
+			case '\r':
+			case '\b':
+			case '\f':
+				// Ignore
 				return;
-			}
-			ensureRestOfQuotedIdentifier(c);
-			currentEnd++;
-		}
-
-	}
-
-	private void readIdentifier(int c) throws IOException {
-		currentStart = pos - 1;
-		currentEnd = pos;
-		// Now read rest of identifier, ending on quotes
-		for (;;) {
-			c = read();
-			if (c == -1) {
-				throw new EOFException("EOF in middle of identifier on line " + line + ":" + col);
-			}
-			if (c == ':') {
-				// Got it.
-				return;
-			}
-			ensureRestOfIdentifier(c);
-			currentEnd++;
-		}
-	}
-
-	private int readTripleQuotedString(int c, boolean asProperty) throws IOException {
-		int quoteCount = 0;
-		boolean escape = false;
-		if (baos == null) {
-			baos = new ByteArrayOutputStream(1024);
-		}
-		// Read lines
-		for (;;) {
-			if (c == -1) {
-				throw new EOFException("Unexpected EOF reading triple quoted string on line " + line + ":" + col);
-			}
-			if (escape) {
-				// Next character is escaped
-				switch (c) {
-					case '\\':
-						baos.write('\\');
-						break;
-					case '\'':
-						baos.write('\'');
-						break;
-					case 't':
-						baos.write('\t');
-						break;
-					case 'n':
-						baos.write('\n');
-						break;
-					case 'r':
-						baos.write('\r');
-						break;
-					case 'b':
-						baos.write('\b');
-						break;
-					case 'f':
-						baos.write('\f');
-						break;
-					case 'u':
-						// Unicode escape sequence
-						writeUTF8fromUCS2(readUnicodeEscape());
-						break;
-					default:
-						throw new IOException("Unrecognised escape \\" + (char) c + " at line " + line + ":" + col);
+			case '{':
+				if (hasRootBrace) {
+					// Complain
+					throw new IOException("Unexpected { looking for member at line " + line + ":" + col);
 				}
-				escape = false;
-			} else {
-				if (c == '\\') {
-					// Escape next character
-					escape = true;
-				} else {
-					if (c == '\'') {
-						quoteCount++;
-						if (quoteCount == 3) {
-							// Done
-							break;
-						}
-					} else {
-						for (int i = 0; i < quoteCount; i++) {
-							baos.write('\'');
-						}
-						quoteCount = 0;
-						baos.write(c);
-						if (c == '\n') {
-							c = ignoreAtMostWhitespace();
-							continue;
-						}
+				// Root brace (optional construct).
+				hasRootBrace = true;
+				return;
+			case '}':
+				if (!hasRootBrace) {
+					throw new IOException("Unexpected } looking for member at line " + line + ":" + col);
+				}
+				if (closedRootBrace) {
+					throw new IOException("Unexpected } at line " + line + ":" + col);
+				}
+				hasRootBrace = false;
+				closedRootBrace = true;
+				return;
+			case '@':
+				// Directive. Pass to listener.
+				start = pos;
+				push(this::readDirective);
+				return;
+			case '#':
+				// Comment to end of line
+				start = pos;
+				push(this::readHashComment);
+				return;
+			case '/':
+				// Start of C comment or C++ comment
+				c = peek(0);
+				if (c == '/') {
+					start = ++pos;
+					push(this::readSlashSlashComment);
+					return;
+				} else if (c == '*') {
+					start = pos++;
+					push(this::readBlockComment);
+					return;
+				}
+				// Intentional fallthrough
+			default:
+				if (closedRootBrace) {
+					// Only allowed comments from now on
+					throw new IOException("Unexpected " + (char) c + "(0x" + Integer.toHexString(c) + ") after final root brace at line " + line + ":" + col);
+				}
+				// We must be looking for a member. Don't allow root braces any more
+				start = pos--;
+				push(this::readMember);
+		}
+
+	}
+
+	/**
+	 * Accept anything up to a newline
+	 */
+	private void readHashComment(int c) {
+		if (c == '\n' || c == -1) {
+			// Done!
+			start = trimLeadingWhitespace(start);
+			int end = trimTrailingWhitespace(pos, in);
+			listener.comment(in, start, end - start, THJSONCommentType.HASH);
+			pop();
+		}
+	}
+
+	/**
+	 * Accept anything up to a newline, EOF, or single line comment
+	 */
+	private void readDirective(int c) {
+		boolean endDirective = false;
+		State newState = null;
+		int posd = 0;
+
+		if (c == '\n' || c == -1) {
+			endDirective = true;
+		} else if (c == '#') {
+			endDirective = true;
+			newState = this::readHashComment;
+		} else if (c == '/' && peek(0) == '/') {
+			endDirective = true;
+			newState = this::readSlashSlashComment;
+			posd = 1;
+		}
+
+		if (endDirective) {
+			int end = trimTrailingWhitespace(pos - 1, in);
+			pos += posd;
+			listener.directive(in, start, end - start);
+			pop();
+			if (newState != null) {
+				start = pos;
+				push(newState);
+			}
+		}
+	}
+
+	/**
+	 * Accept anything up to a newline, comma, or comment
+	 */
+	private void readFunctionAsMemberValue(int c) throws IOException {
+		readFunction(c, this::emitProperty);
+	}
+
+	/**
+	 * Accept anything up to a newline, comma, or comment
+	 */
+	private void readFunctionAsArrayValue(int c) throws IOException {
+		readFunction(c, this::emitValue);
+	}
+
+	/**
+	 * Accept anything up to a newline, comma, or comment
+	 */
+	private void readFunction(int c, Runnable r) throws IOException {
+		boolean endFunction = false;
+		State newState = null;
+		int posd = 0;
+
+		if (c == '\n' || c == ',') {
+			endFunction = true;
+		} else if (c == '#') {
+			endFunction = true;
+			newState = this::readHashComment;
+		} else if (c == '/') {
+			if (peek(0) == '/') {
+				endFunction = true;
+				newState = this::readSlashSlashComment;
+				posd = 1;
+			} else if (peek(0) == '*') {
+				endFunction = true;
+				newState = this::readBlockComment;
+				posd = 1;
+			}
+		}
+
+		if (endFunction) {
+			int end = trimTrailingWhitespaceAndComma(pos - 1, in);
+			pos += posd;
+			String ret = listener.function(in, start, end - start);
+			byte[] bytes = ret.getBytes(UTF_8);
+			valueStart = maybeInitBAOS();
+			valueSource = baos;
+			valueSource.write(bytes);
+			valueEnd = valueSource.size();
+			r.run();
+			pop();
+			if (newState != null) {
+				start = pos;
+				push(newState);
+			}
+		}
+	}
+
+	/**
+	 * Accept anything up to a newline
+	 */
+	private void readSlashSlashComment(int c) {
+		if (c == '\n' || c == -1) {
+			// Done!
+			start = trimLeadingWhitespace(start);
+			int end = trimTrailingWhitespace(pos, in);
+			listener.comment(in, start, end - start, THJSONCommentType.SLASHSLASH);
+			pop();
+		}
+	}
+
+	/**
+	 * Maybe terminate when we get a *
+	 */
+	private void readBlockComment(int c) {
+		if (c == '*' && peek(0) == '/') {
+			pop();
+			listener.comment(in, start, pos - start, THJSONCommentType.BLOCK);
+			pos++;
+		}
+	}
+
+	/**
+	 * Looking for String : value
+	 */
+	private void readMember(int c) {
+		pop();
+		push(this::readMemberValue);
+		push(this::readKey);
+		start = --pos;
+	}
+
+	/**
+	 * Can be true | false | null | [object] | [array] | [number] | [string]
+	 */
+	private void readMemberValue(int c) {
+		if (c == '"') {
+			valueStart = pos;
+			pop();
+			push(this::readQuotedStringMemberValue);
+			return;
+		}
+
+		if (c == '\'' && peek(0) == '\'' && peek(1) == '\'') {
+			pos += 2;
+			valueStart = maybeInitBAOS();
+			valueSource = baos;
+			align = col - 1;
+			pop();
+			push(this::readTripleQuotedStringPropertyFirstLine);
+			return;
+		}
+
+		if (c == '{') {
+			listener.beginMap(in, keyStart, keyEnd - keyStart);
+			pop();
+			pushObject(listener::endMap);
+			push(this::readMapMemberValue);
+			push(this::readWhitespace);
+			return;
+		}
+
+		if (c == '[') {
+			listener.beginArray(in, keyStart, keyEnd - keyStart);
+			pop();
+			pushObject(listener::endArray);
+			push(this::readArrayMemberValue);
+			push(this::readWhitespace);
+			return;
+		}
+
+		if (c == '@') {
+			pop();
+			push(this::readFunctionAsMemberValue);
+			return;
+		}
+
+		valueStart = --pos;
+		pop();
+		push(this::readSimpleMemberValueOrMaybeClass);
+	}
+
+	private void pushObject(Runnable r) {
+		objectStack.push(r);
+	}
+
+	private void popObject() {
+		objectStack.pop().run();
+	}
+
+	/**
+	 * Reading a {} map of key:value pairs.
+	 */
+	private void readMapMemberValue(int c) {
+		// We must be looking for a member or } to finish
+		if (c == '}') {
+			// Done
+			popObject();
+			pop();
+			push(this::readWhitespaceAndComma);
+			return;
+		}
+
+		start = pos--;
+		push(this::readWhitespace);
+		push(this::readMember);
+	}
+
+	private void readArrayMemberValue(int c) {
+		// Read values or ] to finish
+		if (c == ']') {
+			// Done
+			popObject();
+			pop();
+			return;
+		}
+
+		start = pos--;
+		push(this::readArrayValue);
+	}
+
+	private void readArrayValue(int c) {
+		if (c == '"') {
+			valueStart = pos;
+			pop();
+			push(this::readWhitespace);
+			push(this::readQuotedStringArrayValue);
+			return;
+		}
+
+		if (c == '\'' && peek(0) == '\'' && peek(1) == '\'') {
+			align = col - 2;
+			pos += 2;
+			valueStart = maybeInitBAOS();
+			valueSource = baos;
+			pop();
+			push(this::readWhitespaceAndComma);
+			push(this::readTripleQuotedStringValueFirstLine);
+			return;
+		}
+
+		if (c == '{') {
+			listener.beginMapValue(in);
+			pushObject(listener::endMap);
+			pop();
+			push(this::readMapMemberValue);
+			push(this::readWhitespace);
+			return;
+		}
+
+		if (c == '[') {
+			listener.beginArrayValue(in);
+			pop();
+			pushObject(listener::endArray);
+			push(this::readArrayMemberValue);
+			push(this::readWhitespace);
+			return;
+		}
+
+		if (c == '@') {
+			push(this::readFunctionAsArrayValue);
+			return;
+		}
+
+		valueStart = --pos;
+		pop();
+		push(this::readWhitespace);
+		push(this::readSimpleArrayValueOrMaybeClass);
+	}
+
+	private boolean hasComma(int from, int to, byte[] buf) {
+		for (int i = from; i < to; i++) {
+			if (buf[i] == ',') {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private void readSimpleArrayValueOrMaybeClass(int c) {
+		switch (c) {
+			case '{':
+				// Object; string we've read so far is class name... unless it was numerical, or got a comma in it
+				valueStart = trimLeadingWhitespace(valueStart);
+				valueEnd = trimTrailingWhitespace(pos - 1, in);
+				if (determinePrimitiveType(in, valueStart, valueEnd) != STRING || hasComma(valueStart, valueEnd, in)) {
+					// Not a classname, looks like another array element
+					if (valueEnd - valueStart > 0) {
+						emitValue();
 					}
+					listener.beginMapValue(in);
+					pop();
+					pushObject(listener::endMap);
+					push(this::readArrayMemberValue);
+					push(this::readWhitespace);
+				} else {
+					listener.beginObjectValue(in, valueStart, valueEnd - valueStart);
+					pop();
+					pushObject(listener::endObject);
+					push(this::readArrayMemberValue);
+					push(this::readWhitespace);
 				}
+				return;
+			case '[':
+				// List; string we've read so far is class name... unless it was numerical, or got a comma in it
+				valueStart = trimLeadingWhitespace(valueStart);
+				valueEnd = trimTrailingWhitespace(pos - 1, in);
+				if (determinePrimitiveType(in, valueStart, valueEnd) != STRING || hasComma(valueStart, valueEnd, in)) {
+					if (valueEnd - valueStart > 0) {
+						emitValue();
+					}
+					listener.beginArrayValue(in);
+					pop();
+					pushObject(listener::endArray);
+					push(this::readArrayMemberValue);
+					push(this::readWhitespace);
+				} else {
+					listener.beginListValue(in, valueStart, valueEnd - valueStart);
+					pop();
+					pushObject(listener::endList);
+					push(this::readArrayMemberValue);
+					push(this::readWhitespace);
+				}
+				return;
+			case ',':
+				// Special case... if what we have so far is a valid number, true, false, or null, we end the value; otherwise carry on
+				if (determinePrimitiveType(in, valueStart, pos - 1) == STRING) {
+					return;
+				}
+				// Intentional fallthrough
+			case '\n':
+				// End of line - that's the whole value
+				valueStart = trimLeadingWhitespace(valueStart);
+				valueEnd = trimTrailingWhitespaceAndComma(pos, in);
+				if (valueEnd - valueStart > 0) {
+					emitValue();
+				}
+				pop();
+				return;
+			case ']':
+				// End the list, possibly in a value
+				valueStart = trimLeadingWhitespace(valueStart);
+				valueEnd = trimTrailingWhitespaceAndComma(--pos, in);
+				if (valueEnd - valueStart > 0) {
+					emitValue();
+				}
+				pop();
+				return;
+		}
+	}
+
+	private void readSimpleMemberValueOrMaybeClass(int c) {
+		switch (c) {
+			case '{':
+				// Object; string we've read so far is class name.
+				valueStart = trimLeadingWhitespace(valueStart);
+				valueEnd = trimTrailingWhitespaceAndComma(pos - 1, in);
+				listener.beginObject(in, keyStart, keyEnd - keyStart, valueStart, valueEnd - valueStart);
+				pop();
+				pushObject(listener::endObject);
+				push(this::readMapMemberValue);
+				push(this::readWhitespace);
+				return;
+			case '[':
+				// List; string we've read so far is class name.
+				valueStart = trimLeadingWhitespace(valueStart);
+				valueEnd = trimTrailingWhitespaceAndComma(pos - 1, in);
+				listener.beginList(in, keyStart, keyEnd - keyStart, valueStart, valueEnd - valueStart);
+				pop();
+				pushObject(listener::endList);
+				push(this::readArrayMemberValue);
+				push(this::readWhitespace);
+				return;
+			case ',':
+				// Special case... if what we have so far is a valid number, true, false, or null, we end the value; otherwise carry on
+				if (determinePrimitiveType(in, valueStart, pos - 1) == STRING) {
+					return;
+				}
+				// Intentional fallthrough
+			case '\n':
+				// End of line - that's the whole value
+				valueStart = trimLeadingWhitespace(valueStart);
+				valueEnd = trimTrailingWhitespaceAndComma(pos, in);
+				emitProperty();
+				pop();
+				return;
+			case '}':
+				// End the object
+				valueStart = trimLeadingWhitespace(valueStart);
+				valueEnd = trimTrailingWhitespaceAndComma(--pos, in);
+				emitProperty();
+				pop();
+				return;
+		}
+	}
+
+	/**
+	 * Looking for quoted-string | key-string
+	 * @param c
+	 * @throws IOException
+	 */
+	private void readKey(int c) throws IOException {
+		keySource = null;
+
+		if (c == '"') {
+			// Quoted string
+			keyStart = pos;
+			pop();
+			push(this::readQuotedStringKey);
+			return;
+		}
+
+		keyStart = --pos;
+		pop();
+		push(this::readQuotelessKey);
+	}
+
+	private void readQuotelessKey(int c) throws IOException {
+		switch (c) {
+			case ',':
+			case '[':
+			case ']':
+			case '{':
+			case '}':
+				// These characters are not allowed
+				throw new IOException("Unexpected " + (char) c + " at line " + line + ":" + col);
+			case '\n':
+				throw new IOException("Unexpected newline reading key at line " + line + ":" + col);
+			case ':':
+				pos--;
+				// Intentional fallthrough
+			case '\t':
+			case ' ':
+			case '\b':
+			case '\f':
+				// Whitespace means end of key; now we need to find the colon
+				keyEnd = trimTrailingWhitespace(pos, in);
+				pop();
+				push(this::readUpToColon);
+				return;
+		}
+	}
+
+	/**
+	 * Ignore whitespace until we get to a colon, then we've got our key
+	 */
+	private void readUpToColon(int c) throws IOException {
+		switch (c) {
+			case ':':
+				// Got the key. Now ignore gap between colon and start of data.
+				pop();
+				push(this::readBlankGapAfterColon);
+				return;
+			case '\n':
+				throw new IOException("Unexpected newline expecting colon at line " + line + ":" + col);
+			case '\t':
+			case '\r':
+			case '\b':
+			case '\f':
+			case ' ':
+				return;
+			default:
+				throw new IOException("Expecting : or , got " + (char) c + " at line " + line + ":" + col);
+
+		}
+	}
+
+	/**
+	 * Read blank gap after colon until we hit something. If we hit a comment or newline, complain
+	 */
+	private void readBlankGapAfterColon(int c) {
+		switch (c) {
+			case ' ':
+			case '\t':
+			case '\b':
+			case '\f':
+			case '\n':
+				return;
+			case '#':
+				push(this::readHashComment);
+				return;
+			// throw new IOException("Got comment but expecting value at line " + line + ":" + col);
+			case '/':
+				// Might be start of C comment or C++ comment. But we don't want that!
+				valueStart = pos;
+				c = peek(0);
+				if (c == '/') {
+					pos++;
+					start = pos;
+					push(this::readSlashSlashComment);
+				} else if (c == '*') {
+					start = pos;
+					push(this::readBlockComment);
+					// throw new IOException("Got comment but expecting value at line " + line + " : " + col);
+				}
+				return;
+			default:
+				// We're done
+				valueStart = --pos;
+				pop();
+		}
+	}
+
+	/**
+	 * Read whitespace until we hit something. If we hit a comment, read that.
+	 */
+	private void readWhitespace(int c) throws IOException {
+		if (isWhitespace(c)) {
+			return;
+		}
+
+		switch (c) {
+			case '#':
+				// Comment to end of line
+				start = pos;
+				push(this::readHashComment);
+				return;
+			case '/':
+				// Start of C comment or C++ comment
+				c = peek(0);
+				if (c == '/') {
+					start = ++pos;
+					push(this::readSlashSlashComment);
+				} else if (c == '*') {
+					start = pos;
+					push(this::readBlockComment);
+				} else {
+					throw new IOException("Expected / or * at line " + line + ":" + col);
+				}
+				return;
+			default:
+				// We're done
+				pos--;
+				pop();
+		}
+	}
+
+	/**
+	 * Read whitespace until we hit something. If we hit a comment, read that.
+	 */
+	private void readWhitespaceAndComma(int c) throws IOException {
+		switch (c) {
+			case ' ':
+			case '\t':
+			case '\b':
+			case '\f':
+			case '\n':
+				return;
+			case ',':
+				// Ok got the comma, now we only want whitespace
+				pop();
+				push(this::readWhitespace);
+				return;
+			case '#':
+				// Comment to end of line
+				start = pos;
+				push(this::readHashComment);
+				return;
+			case '/':
+				// Start of C comment or C++ comment
+				c = peek(0);
+				if (c == '/') {
+					start = ++pos;
+					push(this::readSlashSlashComment);
+				} else if (c == '*') {
+					start = pos;
+					push(this::readBlockComment);
+				} else {
+					throw new IOException("Expected / or * at line " + line + ":" + col);
+				}
+				return;
+			default:
+				// We're done
+				pos--;
+				pop();
+		}
+	}
+
+	private int maybeInitBAOS() {
+		if (baos == null) {
+			baos = new AccessibleByteArrayOutputStream(1024);
+		}
+		return baos.size();
+	}
+
+	/**
+	 * Read all characters until we get to an unescaped " character, then ...
+	 */
+	private void readQuotedStringKey(int c) throws IOException {
+		if (c == '\\') {
+			// Switch to byte array reading
+			int newStart = maybeInitBAOS();
+			keySource = baos;
+			baos.write(in, keyStart, pos - keyStart - 1);
+			keyStart = newStart;
+			push(this::readQuotedStringKeyEscape);
+			return;
+		}
+
+		if (c == '"') {
+			// Got it
+			if (keySource == null) {
+				// Not escaped
+				keyEnd = pos - 1;
+			} else {
+				keyEnd = keyStart + keySource.size();
 			}
-			c = read();
-		}
-		byte[] buf = baos.toByteArray();
-		baos.reset();
-		// Strip last newline
-		int length = buf.length;
-		if (buf[length - 1] == '\n') {
-			length--;
+			pop();
+			push(this::readUpToColon);
+			return;
 		}
 
-		if (asProperty) {
-			listener.property(in, currentStart, currentEnd - currentStart, buf, STRING, 0, length);
-		} else {
-			listener.value(buf, STRING, 0, length);
+		if (keySource != null) {
+			// We need to collect characters
+			keySource.write(c);
 		}
 
-		// Ignore whitespace
-		c = ignoreWhitespace();
+		if (c == '\n') {
+			throw new IOException("Unexpected newline reading quoted key at line " + line + ":" + col);
+		}
+	}
 
-		// Ignore comma
-		if (c == ',') {
-			c = ignoreWhitespace();
+	/**
+	 * Read all characters until we get to an unescaped " character, then ...
+	 */
+	private void readQuotedStringMemberValue(int c) throws IOException {
+		if (c == '\\') {
+			// Maybe switch to byte array reading
+			if (valueSource == null) {
+				int newStart = maybeInitBAOS();
+				valueSource = baos;
+				baos.write(in, valueStart, pos - valueStart - 1);
+				valueStart = newStart;
+			}
+			push(this::readQuotedStringMemberValueEscape);
+			return;
 		}
 
-		return c;
+		if (c == '"') {
+			// Got it
+			if (valueSource == null) {
+				// Not escaped
+				valueEnd = pos - 1;
+			} else {
+				valueEnd = valueSource.size();
+			}
+			emitStringProperty();
+			pop();
+			push(this::readWhitespaceAndComma);
+			return;
+		}
+
+		if (valueSource != null) {
+			// We need to collect characters
+			valueSource.write(c);
+		}
+
+		if (c == '\n') {
+			throw new IOException("Unexpected newline reading quoted string at line " + line + ":" + col);
+		}
+	}
+
+	/**
+	 * Read all characters until we get to an unescaped " character, then ...
+	 */
+	private void readQuotedStringArrayValue(int c) throws IOException {
+		if (c == '\\') {
+			// Maybe switch to byte array reading
+			if (valueSource == null) {
+				int newStart = maybeInitBAOS();
+				valueSource = baos;
+				baos.write(in, valueStart, pos - valueStart - 1);
+				valueStart = newStart;
+			}
+			push(this::readQuotedStringArrayValueEscape);
+			return;
+		}
+
+		if (c == '"') {
+			// Got it
+			if (valueSource == null) {
+				// Not escaped
+				valueEnd = pos - 1;
+			} else {
+				valueEnd = valueSource.size();
+			}
+			emitStringValue();
+			pop();
+			push(this::readWhitespaceAndComma);
+			return;
+		}
+
+		if (valueSource != null) {
+			// We need to collect characters
+			valueSource.write(c);
+		}
+
+		if (c == '\n') {
+			throw new IOException("Unexpected newline reading quoted string at line " + line + ":" + col);
+		}
+	}
+
+	private void readQuotedStringMemberValueEscape(int c) throws IOException {
+		readEscape(c, valueSource);
+	}
+
+	private void readQuotedStringArrayValueEscape(int c) throws IOException {
+		readEscape(c, valueSource);
+	}
+
+	private void readQuotedStringKeyEscape(int c) throws IOException {
+		readEscape(c, keySource);
 	}
 
 	/**
@@ -662,459 +1384,198 @@ public class THJSONReader {
 		return (readHexDigit() << 12) | (readHexDigit() << 8) | (readHexDigit() << 4) | readHexDigit();
 	}
 
-	/**
-	 * The incoming character is in UCS2 (16-bit) format; we will write it out to the temporarary baos buffer as a UTF8 sequence
-	 * @param c
-	 */
-	private void writeUTF8fromUCS2(int c) {
-		if (c < 0x80) {
-			baos.write(c);
-		} else if (c < 0x800) {
-			int byte1 = 0x80 | (c & 0x3F);
-			c >>= 6;
-			int byte0 = 0xC0 | c;
-			baos.write(byte0);
-			baos.write(byte1);
-		} else {
-			int byte2 = 0x80 | (c & 0x3F);
-			c >>= 6;
-			int byte1 = 0x80 | (c & 0x3F);
-			c >>= 6;
-			int byte0 = 0xE0 | c;
-			baos.write(byte0);
-			baos.write(byte1);
-			baos.write(byte2);
-		}
-	}
-
-	/**
-	 * Read up to the next quote. If we encounter a newline, that's an error. Quoted values are a bit of a pain as they require us to handle escapes - but if we
-	 * process an escape, then the string can't be just a view of the original source bytes. So we will have to create a new source array of bytes just to hold
-	 * it. As an optimisation we'll only bother if and only if we encounter an escape.
-	 */
-	private int readQuotedValue(boolean asProperty) throws IOException {
-		int startOfValue = pos, endOfValue = pos;
-		boolean escape = false;
-		ByteArrayOutputStream scratch = null;
-		for (;;) {
-			int c = read();
-			if (c == -1) {
-				throw new EOFException("EOF in middle of quoted value on line " + line + ":" + col);
-			}
-			if (c == '\n' || c == '\r') {
-				throw new IOException("Unexpected CR or LF in quoted string on line " + line + ":" + col);
-			}
-			if (escape) {
-				// Next character is escaped and is accepted verbatim. We know we must be using transformed storage
-				assert scratch != null;
-				switch (c) {
-					case 'n':
-						scratch.write('\n');
-						break;
-					case 'r':
-						scratch.write('\r');
-						break;
-					case 't':
-						scratch.write('\t');
-						break;
-					case 'b':
-						scratch.write('\b');
-						break;
-					case 'f':
-						scratch.write('\f');
-						break;
-					case '\\':
-						scratch.write('\\');
-						break;
-					case '"':
-						scratch.write('"');
-						break;
-					case 'u':
-						// Unicode escape sequence
-						writeUTF8fromUCS2(readUnicodeEscape());
-						break;
-					default:
-						throw new IOException("Unrecognised escape \\" + (char) c + " at line " + line + ":" + col);
-				}
-				escape = false;
-			} else {
-				if (c == '\\') {
-					// Escape next character. We need to be using special transformed storage now.
-					if (scratch == null) {
-						if (baos == null) {
-							baos = new ByteArrayOutputStream(1024);
-						}
-						scratch = baos;
-
-						// Copy what we've got so far
-						baos.write(in, startOfValue, endOfValue - startOfValue);
-					}
-					escape = true;
-				} else if (c == '"') {
-					// Got the end
-					if (scratch == null) {
-						// No escapes were used so we can just do a view of the original byte source
-						if (asProperty) {
-							listener.property(in, currentStart, currentEnd - currentStart, in, STRING, startOfValue, endOfValue - startOfValue);
-						} else {
-							listener.value(in, STRING, startOfValue, endOfValue - startOfValue);
-						}
-					} else {
-						byte[] buf = scratch.toByteArray();
-						scratch.reset();
-						if (asProperty) {
-							listener.property(in, currentStart, currentEnd - currentStart, buf, STRING, 0, buf.length);
-						} else {
-							listener.value(buf, STRING, 0, buf.length);
-						}
-					}
-
-					// Ignore whitespace
-					c = ignoreWhitespace();
-
-					// Ignore comma
-					if (c == ',') {
-						c = ignoreWhitespace();
-					}
-
-					return c;
-				} else if (scratch != null) {
-					scratch.write(c);
-				}
-			}
-			endOfValue++;
-		}
-
-	}
-
-	private void emitValue(int startOfValue, int endOfValue) {
-		listener.value(in, determinePrimitiveType(in, startOfValue, endOfValue), startOfValue, endOfValue - startOfValue);
-	}
-
-	private void emitProperty(int startOfValue, int endOfValue) {
-		listener.property(in, currentStart, currentEnd - currentStart, in, determinePrimitiveType(in, startOfValue, endOfValue), startOfValue, endOfValue - startOfValue);
-	}
-
-	private int readList(int tagStart, int tagLength) throws IOException {
-		if (tagLength > 0) {
-			// A typed list
-			listener.beginList(in, currentStart, currentEnd - currentStart, tagStart, tagLength);
-		} else {
-			// An untyped array
-			listener.beginArray(in, currentStart, currentEnd - currentStart);
-		}
-		listDepth++;
-		int c = ignoreWhitespace();
-		for (;;) {
-			if (c == ']') {
-				// Got it
-				listDepth--;
-				if (tagLength > 0) {
-					listener.endList();
-				} else {
-					listener.endArray();
-				}
+	private void readEscape(int c, ByteArrayOutputStream out) throws IOException {
+		switch (c) {
+			case 't':
+				out.write('\t');
 				break;
-			}
-
-			c = readValue(c, false);
+			case 'n':
+				out.write('\n');
+				break;
+			case 'r':
+				out.write('\r');
+				break;
+			case 'b':
+				out.write('\b');
+				break;
+			case 'f':
+				out.write('\f');
+				break;
+			case '"':
+				out.write('\"');
+				break;
+			case '\\':
+				out.write('\\');
+				break;
+			case 'u':
+				// 4-char hex escape
+				int escaped = readUnicodeEscape();
+				writeUTF8fromUCS2(escaped, out);
+				break;
+			default:
+				throw new IOException("Unknown escape sequence " + (char) c + " at line " + line + ":" + col);
 		}
-
-		// Ignore whitespace
-		c = ignoreWhitespace();
-
-		// Ignore comma
-		if (c == ',') {
-			c = ignoreWhitespace();
-		}
-
-		return c;
+		pop();
 	}
 
-	private int readValue(int c, boolean asProperty) throws IOException {
-		int quoteCount = 0;
-		int startOfValue = pos - 1, endOfValue = pos - 1;
-		boolean started = false;
-		boolean doEndArray = false, doEndObject = false;
-		loop: for (;;) {
-			if (c == -1) {
-				throw new EOFException("EOF in middle of value on line " + line + ":" + col);
-			}
-			if (!started) {
-				// Waiting for first useful character
-				if (c == '\'') {
-					if (quoteCount == 0) {
-						linePos = col;
-					}
-					quoteCount++;
-					if (quoteCount == 3) {
-						// Begin triple quoted string
-						return readTripleQuotedString(ignoreWhitespace(), asProperty);
-					}
-				} else if (quoteCount > 0) {
-					started = true;
-					endOfValue = startOfValue + quoteCount;
-					quoteCount = 0;
-					if (c == '\n' || c == '\r') {
-						break loop;
-					}
-				} else {
-					if (c == '{') {
-						// Read an untagged object
-						return read(c, true, false, 0, 0);
-					}
-					if (c == '}') {
-						// End an object
-						if (objectDepth == 0) {
-							throw new IOException("Unexpected } reading value on line " + line + ":" + col);
-						}
-						doEndObject = true;
-						break loop;
-					}
-					if (c == '[') {
-						// Read an array
-						return readList(0, 0);
-					}
-					if (c == ']') {
-						// End an array
-						if (listDepth == 0) {
-							throw new IOException("Unexpected ] reading value on line " + line + ":" + col);
-						}
-						doEndArray = true;
-						break loop;
-					}
-					if (c == '"') {
-						// Read a quoted value
-						return readQuotedValue(asProperty);
-					}
-					if (c == '\n' || c == '\r') {
-						throw new IOException("Unexpected CR or LF before value on line " + line + ":" + col);
-					}
-					started = true;
-					endOfValue++;
-				}
-			} else {
-				// Read until comment, or newline, or {
-				switch (c) {
-					case '/':
-						// If next char is / or *, it's a comment
-						c = read();
-						if (c == -1) {
-							throw new EOFException("EOF in middle of value for on line " + line + ":" + col);
-						}
-						if (c == '/') {
-							// Double-slash
-							ignoreToEndOfLine();
-							break loop;
-						} else if (c == '*') {
-							// C-style comment, ignore till we get */
-							readToEndOfComment();
-							break loop;
-						} else {
-							// Ok, it was just a plain old slash
-							endOfValue++;
-						}
-						break;
-					case ']':
-						// End an array
-						if (listDepth == 0) {
-							throw new IOException("Unexpected ] reading value on line " + line + ":" + col);
-						}
-						doEndArray = true;
-						break loop;
-
-					case '#':
-						// Ignore to end of line
-						ignoreToEndOfLine();
-						break loop;
-					case '\n':
-					case '\r':
-						break loop;
-					case ',':
-						// Special case... comma only ends value if the value is a valid number or boolean literal so far
-						if (determinePrimitiveType(in, startOfValue, endOfValue) != STRING) {
-							break loop;
-						}
-						endOfValue++;
-						break;
-					case '{':
-						// Begin a tagged object. Trim whitespace from the end of the value
-						endOfValue = trimWhitespace(endOfValue);
-						return read(c, true, true, startOfValue, endOfValue - startOfValue);
-
-					case '[':
-						// Read a tagged array. Trim whitespace from the end of the value
-						endOfValue = trimWhitespace(endOfValue);
-						return readList(startOfValue, endOfValue - startOfValue);
-
-					default:
-						endOfValue++;
-				}
-			}
-
-			c = read();
+	private void readTripleQuotedStringPropertyFirstLine(int c) {
+		if (maybeEndTripleQuote(c, this::emitStringProperty)) {
+			return;
 		}
-		// Ok, now, scan back from the terminal point to the first non-whitespace and non-comma character
-		endOfValue = trimWhitespaceAndComma(endOfValue);
-		if (asProperty) {
-			emitProperty(startOfValue, endOfValue);
+
+		// Ignore whitespace after the ''' sequence
+		if (c == '\t' || c == ' ' || c == '\f' || c == '\b') {
+			return;
+		}
+
+		if (c == '\n') {
+			pop();
+			push(this::readTripleQuotedStringPropertyRemaining);
+			push(this::readStartColumnWhitespace);
+			return;
+		}
+
+		valueSource.write(c);
+		pop();
+		push(this::readTripleQuotedStringPropertyFirstLineRemaining);
+	}
+
+	private void readTripleQuotedStringPropertyFirstLineRemaining(int c) {
+		if (maybeEndTripleQuote(c, this::emitStringProperty)) {
+			return;
+		}
+
+		// Collect characters
+		valueSource.write(c);
+
+		if (c == '\n') {
+			pop();
+			push(this::readTripleQuotedStringPropertyRemaining);
+			push(this::readStartColumnWhitespace);
+			return;
+		}
+
+	}
+
+	private void readTripleQuotedStringPropertyRemaining(int c) {
+		if (maybeEndTripleQuote(c, this::emitStringProperty)) {
+			return;
+		}
+
+		// Collect characters
+		valueSource.write(c);
+
+		// When we get a newline, ignore up to the start column's worth of whitespace.
+		if (c == '\n') {
+			push(this::readStartColumnWhitespace);
+			return;
+		}
+	}
+
+	private boolean maybeEndTripleQuote(int c, Runnable r) {
+		if (c == '\'' && peek(0) == '\'' && peek(1) == '\'') {
+			// The end of the string
+			pop();
+			valueEnd = trimTrailingWhitespaceAndComma(valueSource.size(), valueSource.getBuf());
+			r.run();
+			pos += 2;
+			return true;
 		} else {
-			emitValue(startOfValue, endOfValue);
-		}
-		if (doEndArray) {
-			return ']';
-		}
-		if (doEndObject) {
-			return '}';
-		}
-		return ignoreWhitespace();
-	}
-
-	private int trimWhitespace(int from) {
-		for (;;) {
-			int cc = in[from - 1];
-			if (isWhitespace(cc)) {
-				from--;
-			} else {
-				return from;
-			}
+			return false;
 		}
 	}
 
-	private int trimWhitespaceAndComma(int from) {
-		for (;;) {
-			int cc = in[from - 1];
-			if (cc == ',') {
-				from--;
-			} else if (isWhitespace(cc)) {
-				from--;
-			} else {
-				return from;
-			}
+	private void readStartColumnWhitespace(int c) {
+		if (col >= align) {
+			// We're ready to start reading actual characters whatever
+			pos--;
+			pop();
+			return;
+		}
+
+		if (c == ' ' || c == '\t') {
+			// Ignore
+			return;
+		}
+
+		// We got characters a bit earlier than expected so start reading now
+		pos--;
+		pop();
+	}
+
+	private void readTripleQuotedStringValueFirstLine(int c) {
+		if (maybeEndTripleQuote(c, this::emitStringValue)) {
+			return;
+		}
+
+		// Ignore whitespace after the ''' sequence
+		if (c == '\t' || c == ' ' || c == '\f' || c == '\b') {
+			return;
+		}
+
+		if (c == '\n') {
+			pop();
+			push(this::readTripleQuotedStringValueRemaining);
+			push(this::readStartColumnWhitespace);
+			return;
+		}
+
+		// Collect characters
+		valueSource.write(c);
+		push(this::readTripleQuotedStringValueFirstLineRemaining);
+	}
+
+	private void readTripleQuotedStringValueFirstLineRemaining(int c) {
+		if (maybeEndTripleQuote(c, this::emitStringValue)) {
+			return;
+		}
+
+		// Collect characters
+		valueSource.write(c);
+
+		if (c == '\n') {
+			pop();
+			push(this::readTripleQuotedStringValueRemaining);
+			push(this::readStartColumnWhitespace);
+			return;
 		}
 	}
 
-	private int read(int c, boolean inValue, boolean isTagged, int tagStart, int tagLength) throws IOException {
-		while (!done) {
-			// We can be either: a comment (//, #, or /*), the start of an object {, or the start of a key (alphabetical)
-			switch (c) {
-				case -1:
-					// EOF
-					done = true;
-					return -1;
-				case '/':
-					// Next char must be / or *
-					c = expectStartOfComment();
-					if (c == '/') {
-						// Double-slash
-						ignoreToEndOfLine();
-						c = ignoreWhitespace();
-						continue;
-					} else {
-						// C-style comment, ignore till we get */
-						readToEndOfComment();
-						c = ignoreWhitespace();
-						continue;
-					}
-				case '#':
-					// Ignore to end of line
-					ignoreToEndOfLine();
-					c = ignoreWhitespace();
-					break;
-				case '{':
-					bracketDepth++;
-					if (inValue) {
-						objectDepth++;
-						if (isTagged) {
-							// No class tag
-							listener.beginObject(in, currentStart, currentEnd - currentStart, tagStart, tagLength);
-						} else {
-							listener.beginMap(in, currentStart, currentEnd - currentStart);
-						}
-						c = ignoreWhitespace();
-						c = read(c, false, false, 0, 0);
-					} else if (objectDepth > 0) {
-						throw new IOException("Unexpected { on line " + line + ":" + col);
-					} else {
-						c = ignoreWhitespace();
-					}
-					break;
-				case '}':
-					// End an object.
-					if (bracketDepth == 0) {
-						throw new IOException("Unexpected } on line " + line + ":" + col);
-					}
-					bracketDepth--;
-					if (objectDepth > 0) {
-						objectDepth--;
-						if (isTagged) {
-							listener.endObject();
-						} else {
-							listener.endMap();
-						}
-					}
-					c = ignoreWhitespace();
-					if (c == ',') {
-						c = ignoreWhitespace();
-					}
-					if (inValue) {
-						return c;
-					}
-					break;
-				case '"':
-					// Read a quoted identifier; everything up to ":
-					readQuotedIdentifier();
-					c = ignoreWhitespace();
-					c = readValue(c, true);
-					break;
-				default:
-					// Read an identifier. First expect a legal identifier start; then everything up to :
-					ensureStartOfIdentifier(c);
-					readIdentifier(c);
-					c = ignoreWhitespace();
-					c = readValue(c, true);
-					break;
-			}
+	private void readTripleQuotedStringValueRemaining(int c) {
+		if (maybeEndTripleQuote(c, this::emitStringValue)) {
+			return;
 		}
-		return -1;
+
+		// Collect characters
+		valueSource.write(c);
+
+		// When we get a newline, ignore up to the start column's worth of whitespace.
+		if (c == '\n') {
+			push(this::readStartColumnWhitespace);
+			return;
+		}
+	}
+
+	private void push(State newState) {
+		stack.push(state);
+		state = newState;
+	}
+
+	private void pop() {
+		state = stack.pop();
 	}
 
 	/**
-	 * Read the next byte from the input.
-	 * @return an unsigned byte, or -1 if we've reached EOF
-	 * @throws IOException
+	 * Parse!
 	 */
-	private int read() {
-		if (newLineNext) {
-			newLineNext = false;
-			line++;
-			col = 0;
+	private void parse() throws IOException {
+		int c;
+		while ((c = read()) != -1) {
+			state.read(c);
 		}
-		if (pos == length) {
-			// EOF
-			return -1;
+		state.read(c);
+		if (!stack.isEmpty() || (hasRootBrace && !closedRootBrace)) {
+			throw new EOFException("Unexpected EOF at line " + line + ":" + col + " (stack: " + stack.size() + ")");
 		}
-		int c = in[pos++] & 0xFF;
-		if (c == '\r') {
-			// Turn into \n
-			c = '\n';
-			ignoreNextSlashN = true;
-			newLineNext = true;
-		} else if (c == '\n') {
-			if (ignoreNextSlashN) {
-				ignoreNextSlashN = false;
-				// Recurse
-				return read();
-			} else {
-				newLineNext = true;
-			}
-		} else if (c == '\t') {
-			// 4 space tabs!!
-			col = (col + 4) & ~3;
-		} else {
-			col++;
-		}
-		return c;
 	}
-
 }
