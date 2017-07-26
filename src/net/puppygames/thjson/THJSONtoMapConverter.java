@@ -1,8 +1,5 @@
 package net.puppygames.thjson;
 
-import static java.nio.charset.StandardCharsets.*;
-
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,18 +12,6 @@ import com.google.gson.JsonObject;
  * Converts a THJSON input stream into a {@link Map}. Ordering is maintained.
  */
 public class THJSONtoMapConverter implements THJSONListener {
-
-	private interface Acceptor {
-		void onString(String s);
-
-		void onFloat(float f);
-
-		void onInteger(int i);
-
-		void onBoolean(boolean b);
-
-		void onNull();
-	}
 
 	private final Stack<Object> stack = new Stack<>();
 	private final Map<String, Object> root = new LinkedHashMap<>();
@@ -55,29 +40,28 @@ public class THJSONtoMapConverter implements THJSONListener {
 
 	@SuppressWarnings("unchecked")
 	@Override
-	public void beginObject(byte[] src, int key, int keyLength, int clazz, int clazzLength) {
+	public void beginObject(String key, String clazz) {
 		if (debug) {
-			System.out.println("BEGIN OBJECT " + new String(src, key, keyLength, StandardCharsets.UTF_8));
+			System.out.println("BEGIN OBJECT " + key + " " + clazz);
 		}
 		stack.push(current);
 		Map<String, Object> newCurrent = new LinkedHashMap<>();
-		String keyString = new String(src, key, keyLength, StandardCharsets.UTF_8);
-		((Map<String, Object>) current).put(keyString, newCurrent);
+		((Map<String, Object>) current).put(key, newCurrent);
 		current = newCurrent;
-		newCurrent.put("class", new String(src, clazz, clazzLength, StandardCharsets.UTF_8));
+		newCurrent.put("class", clazz);
 	}
 
 	@SuppressWarnings("unchecked")
 	@Override
-	public void beginObjectValue(byte[] src, int clazz, int clazzLength) {
+	public void beginObjectValue(String clazz) {
 		if (debug) {
-			System.out.println("BEGIN OBJECT VALUE");
+			System.out.println("BEGIN OBJECT VALUE " + clazz);
 		}
 		stack.push(current);
 		Map<String, Object> newCurrent = new LinkedHashMap<>();
 		((List<Object>) current).add(newCurrent);
 		current = newCurrent;
-		newCurrent.put("class", new String(src, clazz, clazzLength, StandardCharsets.UTF_8));
+		newCurrent.put("class", clazz);
 	}
 
 	@Override
@@ -90,133 +74,109 @@ public class THJSONtoMapConverter implements THJSONListener {
 
 	@SuppressWarnings("unchecked")
 	@Override
-	public void property(byte[] src, int key, int keyLength, byte[] valueSrc, THJSONPrimitiveType type, int value, int valueLength) {
+	public void property(String key, boolean value) {
 		if (debug) {
-			System.out.println("PROPERTY " + new String(src, key, keyLength, StandardCharsets.UTF_8) + " VALUE " + new String(valueSrc, value, valueLength, StandardCharsets.UTF_8));
+			System.out.println("PROPERTY " + key + "=" + value);
 		}
-		String keyString = new String(src, key, keyLength, StandardCharsets.UTF_8);
-		onValue(type, valueSrc, value, valueLength, new Acceptor() {
-			@Override
-			public void onString(String s) {
-				((Map<String, Object>) current).put(keyString, s);
-			}
-
-			@Override
-			public void onFloat(float f) {
-				((Map<String, Object>) current).put(keyString, f);
-			}
-
-			@Override
-			public void onInteger(int i) {
-				((Map<String, Object>) current).put(keyString, i);
-			}
-
-			@Override
-			public void onBoolean(boolean b) {
-				((Map<String, Object>) current).put(keyString, b);
-			}
-
-			@Override
-			public void onNull() {
-				((Map<String, Object>) current).put(keyString, null);
-			}
-		});
-	}
-
-	private void onValue(THJSONPrimitiveType type, byte[] src, int start, int length, Acceptor a) {
-		if (type == THJSONPrimitiveType.NULL) {
-			a.onNull();
-			return;
-		}
-		String value = new String(src, start, length, StandardCharsets.UTF_8);
-		switch (type) {
-			case BOOLEAN:
-				a.onBoolean(Boolean.parseBoolean(value));
-				break;
-			case FLOAT:
-				try {
-					a.onFloat(Float.parseFloat(value));
-				} catch (NumberFormatException e) {
-					// Treat as string instead
-					a.onString(value);
-				}
-				break;
-			case INTEGER:
-				if (value.startsWith("0x")) {
-					// Unsigned hex integer
-					try {
-						a.onInteger(Integer.parseUnsignedInt(value.substring(2), 16));
-					} catch (NumberFormatException e) {
-						// Treat as string instead
-						a.onString(value);
-					}
-				} else if (value.startsWith("%")) {
-					// Unsigned binary integer
-					try {
-						a.onInteger(Integer.parseUnsignedInt(value.substring(1), 2));
-					} catch (NumberFormatException e) {
-						// Treat as string instead
-						a.onString(value);
-					}
-				} else {
-					a.onInteger(Integer.parseInt(value));
-				}
-				break;
-			default:
-				a.onString(value);
-		}
+		((Map<String, Object>) current).put(key, value);
 	}
 
 	@SuppressWarnings("unchecked")
 	@Override
-	public void value(byte[] src, THJSONPrimitiveType type, int value, int valueLength) {
+	public void property(String key, float value) {
 		if (debug) {
-			System.out.println("VALUE " + new String(src, value, valueLength, UTF_8));
+			System.out.println("PROPERTY " + key + "=" + value);
 		}
-		onValue(type, src, value, valueLength, new Acceptor() {
-			@Override
-			public void onString(String s) {
-				((List<Object>) current).add(s);
-			}
-
-			@Override
-			public void onFloat(float f) {
-				((List<Object>) current).add(f);
-			}
-
-			@Override
-			public void onInteger(int i) {
-				((List<Object>) current).add(i);
-			}
-
-			@Override
-			public void onBoolean(boolean b) {
-				((List<Object>) current).add(b);
-			}
-
-			@Override
-			public void onNull() {
-				((List<Object>) current).add(null);
-			}
-		});
+		((Map<String, Object>) current).put(key, value);
 	}
 
 	@SuppressWarnings("unchecked")
 	@Override
-	public void beginArray(byte[] src, int key, int keyLength) {
+	public void property(String key, int value, IntegerType type) {
 		if (debug) {
-			System.out.println("BEGIN ARRAY " + new String(src, key, keyLength, StandardCharsets.UTF_8));
+			System.out.println(type + " PROPERTY " + key + "=" + value);
+		}
+		((Map<String, Object>) current).put(key, value);
+	}
+
+	@SuppressWarnings("unchecked")
+	@Override
+	public void property(String key, String value, StringType type) {
+		if (debug) {
+			System.out.println(type + " PROPERTY " + key + "=" + value + "<");
+		}
+		((Map<String, Object>) current).put(key, value);
+	}
+
+	@SuppressWarnings("unchecked")
+	@Override
+	public void nullProperty(String key) {
+		if (debug) {
+			System.out.println("PROPERTY " + key + "=null");
+		}
+		((Map<String, Object>) current).put(key, null);
+	}
+
+	@SuppressWarnings("unchecked")
+	@Override
+	public void value(boolean value) {
+		if (debug) {
+			System.out.println("VALUE " + value);
+		}
+		((List<Object>) current).add(value);
+	}
+
+	@SuppressWarnings("unchecked")
+	@Override
+	public void value(float value) {
+		if (debug) {
+			System.out.println("VALUE " + value);
+		}
+		((List<Object>) current).add(value);
+	}
+
+	@SuppressWarnings("unchecked")
+	@Override
+	public void value(int value, IntegerType type) {
+		if (debug) {
+			System.out.println(type + " VALUE " + value);
+		}
+		((List<Object>) current).add(value);
+	}
+
+	@SuppressWarnings("unchecked")
+	@Override
+	public void value(String value, StringType type) {
+		if (debug) {
+			System.out.println(type + " VALUE " + value);
+		}
+		((List<Object>) current).add(value);
+	}
+
+	@SuppressWarnings("unchecked")
+	@Override
+	public void nullValue() {
+		if (debug) {
+			System.out.println("NULL VALUE");
+		}
+		((List<Object>) current).add(null);
+	}
+
+	@SuppressWarnings("unchecked")
+	@Override
+	public void beginArray(String key) {
+		if (debug) {
+			System.out.println("BEGIN ARRAY " + key);
 		}
 		stack.push(current);
 		List<Object> newCurrent = new ArrayList<>();
-		String keyString = new String(src, key, keyLength, StandardCharsets.UTF_8);
-		((Map<String, Object>) current).put(keyString, newCurrent);
+		((Map<String, Object>) current).put(key, newCurrent);
 		current = newCurrent;
 	}
 
 	@SuppressWarnings("unchecked")
 	@Override
-	public void beginArrayValue(byte[] src) {
+	public void beginArrayValue() {
 		if (debug) {
 			System.out.println("BEGIN ARRAY VALUE");
 		}
@@ -228,19 +188,17 @@ public class THJSONtoMapConverter implements THJSONListener {
 
 	@SuppressWarnings("unchecked")
 	@Override
-	public void beginList(byte[] src, int key, int keyLength, int clazz, int clazzLength) {
+	public void beginList(String key, String clazz) {
 		if (debug) {
-			System.out.println("BEGIN LIST " + new String(src, key, keyLength, StandardCharsets.UTF_8));
+			System.out.println("BEGIN LIST " + key + " " + clazz);
 		}
 		stack.push(current);
 
 		// Create a special "array" object
 		Map<String, Object> array = new LinkedHashMap<>();
 		array.put("class", "array");
-		String typeString = new String(src, clazz, clazzLength, StandardCharsets.UTF_8);
-		array.put("type", typeString);
-		String keyString = new String(src, key, keyLength, StandardCharsets.UTF_8);
-		((Map<String, Object>) current).put(keyString, array);
+		array.put("type", clazz);
+		((Map<String, Object>) current).put(key, array);
 
 		stack.push(array);
 
@@ -251,17 +209,16 @@ public class THJSONtoMapConverter implements THJSONListener {
 
 	@SuppressWarnings("unchecked")
 	@Override
-	public void beginListValue(byte[] src, int clazz, int clazzLength) {
+	public void beginListValue(String clazz) {
 		if (debug) {
-			System.out.println("BEGIN LIST VALUE");
+			System.out.println("BEGIN LIST VALUE " + clazz);
 		}
 		stack.push(current);
 
 		// Create a special "array" object
 		Map<String, Object> array = new LinkedHashMap<>();
 		array.put("class", "array");
-		String typeString = new String(src, clazz, clazzLength, StandardCharsets.UTF_8);
-		array.put("type", typeString);
+		array.put("type", clazz);
 		((List<Object>) current).add(array);
 
 		stack.push(array);
@@ -273,22 +230,21 @@ public class THJSONtoMapConverter implements THJSONListener {
 
 	@SuppressWarnings("unchecked")
 	@Override
-	public void beginMap(byte[] src, int key, int keyLength) {
+	public void beginMap(String key) {
 		if (debug) {
-			System.out.println("BEGIN MAP " + new String(src, key, keyLength, StandardCharsets.UTF_8));
+			System.out.println("BEGIN MAP " + key);
 		}
 		stack.push(current);
 		Map<String, Object> newCurrent = new LinkedHashMap<>();
-		String keyString = new String(src, key, keyLength, StandardCharsets.UTF_8);
-		((Map<String, Object>) current).put(keyString, newCurrent);
+		((Map<String, Object>) current).put(key, newCurrent);
 		current = newCurrent;
 	}
 
 	@SuppressWarnings("unchecked")
 	@Override
-	public void beginMapValue(byte[] src) {
+	public void beginMapValue() {
 		if (debug) {
-			System.out.println("BEGIN MAP");
+			System.out.println("BEGIN MAP VALUE");
 		}
 		stack.push(current);
 		Map<String, Object> newCurrent = new LinkedHashMap<>();
@@ -324,19 +280,13 @@ public class THJSONtoMapConverter implements THJSONListener {
 	}
 
 	@Override
-	public void comment(byte[] src, int start, int length, THJSONCommentType type) {
-		System.out.println("COMMENT:" + new String(src, start, length, StandardCharsets.UTF_8) + "<");
+	public void comment(String text, CommentType type) {
+		System.out.println(type + ":" + text + "<");
 	}
 
 	@Override
-	public void directive(byte[] src, int start, int length) {
-		System.out.println("DIRECTIVE:" + new String(src, start, length, StandardCharsets.UTF_8) + "<");
-	}
-
-	@Override
-	public String function(byte[] src, int start, int length) {
-		System.out.println("FUNCTION CALL:" + new String(src, start, length, StandardCharsets.UTF_8) + "<");
-		return new String(src, start, length, StandardCharsets.UTF_8).toUpperCase();
+	public void directive(String text) {
+		System.out.println("DIRECTIVE:" + text + "<");
 	}
 
 }

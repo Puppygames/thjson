@@ -18,6 +18,7 @@ import com.google.gson.JsonObject;
 public class SimpleTHJSONWriter extends StringWriter implements THJSONWriter {
 
 	public static void main(String[] args) throws IOException, IllegalArgumentException, IllegalAccessException {
+		@SuppressWarnings("resource")
 		SimpleTHJSONWriter writer = new SimpleTHJSONWriter();
 
 		JsonObject json = THJSONReader.convertToJSON("test2.thjson");
@@ -25,6 +26,7 @@ public class SimpleTHJSONWriter extends StringWriter implements THJSONWriter {
 		writer.begin();
 		jsonConverter.write(json);
 		writer.end();
+		System.out.println(writer.toString());
 
 		Map<String, Object> obj2 = THJSONReader.convertToMap("test2.thjson");
 		MapToTHJSONConverter mapConverter = new MapToTHJSONConverter(writer);
@@ -35,6 +37,7 @@ public class SimpleTHJSONWriter extends StringWriter implements THJSONWriter {
 		mapConverter.write(obj2);
 		writer.end();
 
+		@SuppressWarnings("unused")
 		class TestPOJO {
 
 			int a = 1, b = 2, c = 3;
@@ -43,7 +46,7 @@ public class SimpleTHJSONWriter extends StringWriter implements THJSONWriter {
 			int[] f = {1, 2, 3, 4};
 			float[] g = {1.0f, 2.0f, 3.0f};
 			String[] h = {"testing", "a", "string", "array"};
-			List<String> i = Arrays.asList("testing", "a", "string", "list");
+			List<String> i = Arrays.asList("testing", "a", "string with spaces", "list\tescapes");
 			Map<Integer, String> j = new HashMap<>();
 			{
 				j.put(1, "one");
@@ -197,7 +200,7 @@ public class SimpleTHJSONWriter extends StringWriter implements THJSONWriter {
 		int maxLineLength = 0, lineLength = 0;
 		for (int i = 0; i < s.length(); i++) {
 			char c = s.charAt(i);
-			if (!hadChar && (THJSONReader.isWhitespace(c) || c == '"')) {
+			if (!hadChar && (THJSONTokenizer.isWhitespace(c) || c == '"')) {
 				needsQuotes = true;
 			}
 			if (c == '\t' || c == '\f' || c == '\r' || c == '\b') {
@@ -232,7 +235,7 @@ public class SimpleTHJSONWriter extends StringWriter implements THJSONWriter {
 		// If the string has any whitespace in it, or contains quotes, it must be quoted
 		for (int i = 0; i < s.length(); i++) {
 			char c = s.charAt(i);
-			if (THJSONReader.isWhitespace(c) || c == '"') {
+			if (THJSONTokenizer.isWhitespace(c) || c == '"') {
 				return StringClassification.QUOTED;
 			}
 		}
@@ -266,7 +269,7 @@ public class SimpleTHJSONWriter extends StringWriter implements THJSONWriter {
 		write('\"');
 		for (int i = 0; i < s.length(); i++) {
 			char c = s.charAt(i);
-			if (THJSONReader.isWhitespace(c)) {
+			if (THJSONTokenizer.isWhitespace(c)) {
 				switch (c) {
 					case ' ':
 						write(' ');
@@ -274,17 +277,8 @@ public class SimpleTHJSONWriter extends StringWriter implements THJSONWriter {
 					case '\n':
 						write("\\n");
 						break;
-					case '\r':
-						write("\\r");
-						break;
 					case '\t':
 						write("\\t");
-						break;
-					case '\b':
-						write("\\b");
-						break;
-					case '\f':
-						write("\\f");
 						break;
 				}
 			} else if (c == '"') {

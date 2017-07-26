@@ -1,0 +1,45 @@
+a: 1
+b: 2
+c: 3
+d: 1.0
+e: a string test
+
+f: int [
+    1
+    2
+    3
+    4
+]
+
+g: float [
+    1.0
+    2.0
+    3.0
+]
+
+h: java.lang.String [
+    testing
+    a
+    string
+    array
+]
+
+i: java.util.Arrays$ArrayList {
+    a: java.lang.String [
+        testing
+        a
+        string with spaces
+        "list\tescapes"
+    ]
+}
+
+j: java.util.HashMap {
+    threshold: 12
+    loadFactor: 0.75
+}
+
+k: java.util.ArrayList {
+    size: 0
+}
+
+l: null

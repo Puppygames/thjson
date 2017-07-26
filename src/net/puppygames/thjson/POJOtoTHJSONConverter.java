@@ -13,8 +13,8 @@ import java.util.Map;
 /**
  * Stream plain old Java objects to THJSON output.
  * <p>
- * We can turn Maps into THJSON maps, Collections into THJSON arrays, and arrays into THJSON lists, Strings into THJSON strings, primitives and their
- * boxed equivalents into THJSON primitives, and finally Objects into THJSON objects.
+ * We can turn Maps into THJSON maps, Collections into THJSON arrays, and arrays into THJSON lists, Strings into THJSON strings, primitives and their boxed
+ * equivalents into THJSON primitives, and finally Objects into THJSON objects.
  * <p>
  * We make no attempt to refer back to previous references with objects however we will explode if we enter a circular graph.
  */
@@ -91,10 +91,10 @@ public class POJOtoTHJSONConverter {
 	private void writeProperty(String key, Object value) throws IllegalArgumentException, IllegalAccessException {
 		if (value == null) {
 			writer.propertyNull(key);
-			//		} else if (value instanceof Map) {
-			//			writeMap(key, (Map<Object, Object>) value);
-			//		} else if (value instanceof List) {
-			//			writeList(key, (List<Object>) value);
+		} else if (value instanceof Map) {
+			writeMap(key, (Map<Object, Object>) value);
+		} else if (value instanceof List) {
+			writeList(key, (List<Object>) value);
 		} else if (value instanceof String || value instanceof Number || value instanceof Boolean) {
 			writePrimitive(key, value);
 		} else if (value.getClass().isArray()) {

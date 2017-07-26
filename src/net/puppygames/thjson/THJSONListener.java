@@ -31,50 +31,112 @@ POSSIBILITY OF SUCH DAMAGE.
 */
 package net.puppygames.thjson;
 
+import static net.puppygames.thjson.THJSONWriter.*;
+
 /**
  * Listen to the stream of symbols coming in from {@link THJSONReader}
  */
 public interface THJSONListener {
 
+	/**
+	 * Called at the start. Generally we do not need to do anything therefore we provide a default implementation that does nothing.
+	 */
 	default void begin() {
 	}
 
+	/**
+	 * Called at the end. Generally we do not need to do anything therefore we provide a default implementation that does nothing.
+	 */
 	default void end() {
 	}
 
-	void beginMap(byte[] src, int key, int keyLength);
+	/**
+	 * A map inside an object with the specified key. Maps are objects without a class.
+	 * @param key
+	 */
+	void beginMap(String key);
 
-	void beginMapValue(byte[] src);
+	/**
+	 * A map inside an array
+	 */
+	void beginMapValue();
 
-	void beginObject(byte[] src, int key, int keyLength, int clazz, int clazzLength);
+	/**
+	 * An object inside an object with the specified key and class. Objects always have a "class"
+	 * @param key
+	 * @param clazz
+	 */
+	void beginObject(String key, String clazz);
 
-	void beginObjectValue(byte[] src, int clazz, int clazzLength);
+	/**
+	 * An object with the specified class inside an array. Objects always have a "class"
+	 * @param clazz
+	 */
+	void beginObjectValue(String clazz);
 
+	/**
+	 * End an object
+	 */
 	void endObject();
 
+	/**
+	 * End a map
+	 */
 	void endMap();
 
-	void beginArray(byte[] src, int key, int keyLength);
+	void beginArray(String key);
 
-	void beginArrayValue(byte[] src);
+	void beginArrayValue();
 
-	void beginList(byte[] src, int key, int keyLength, int clazz, int clazzLength);
+	void beginList(String key, String clazz);
 
-	void beginListValue(byte[] src, int clazz, int clazzLength);
+	void beginListValue(String clazz);
 
 	void endList();
 
 	void endArray();
 
-	void value(byte[] src, THJSONPrimitiveType type, int value, int valueLength);
+	void value(int value, IntegerType type);
 
-	void property(byte[] src, int key, int keyLength, byte[] valueSrc, THJSONPrimitiveType type, int value, int valueLength);
+	void value(String value, StringType type);
 
-	default void comment(byte[] src, int start, int length, THJSONCommentType type) {
+	void value(boolean value);
+
+	void value(float value);
+
+	void nullValue();
+
+	void property(String key, int value, IntegerType type);
+
+	void property(String key, String value, StringType type);
+
+	void property(String key, boolean value);
+
+	void property(String key, float value);
+
+	void nullProperty(String key);
+
+	/**
+	 * A comment in the source. Generally we don't need to process comments, so this default implementation is a no-op
+	 * @param text
+	 * @param type
+	 */
+	default void comment(String text, CommentType type) {
 	}
 
-	default void directive(byte[] src, int start, int length) {
+	/**
+	 * A directive in the source. Generally we don't need to process directives, so this default implementation is a no-op
+	 * @param text
+	 */
+	default void directive(String text) {
 	}
 
-	String function(byte[] src, int start, int length);
+	/**
+	 * A function in the source. The default implementation is to return the function back again, verbatim, escaped in quotes
+	 * @param text
+	 * @return a String; null will be interpreted as the thjson literal null
+	 */
+	default String function(String text) {
+		return "\"@" + escape(text) + "\"";
+	}
 }

@@ -32,14 +32,12 @@ POSSIBILITY OF SUCH DAMAGE.
 
 package net.puppygames.thjson;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Stack;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonPrimitive;
 
 /**
  * This will handily convert a THJSON stream into a {@link JsonObject} object instance. Class objects will have a property, "class", set on them with the class
@@ -47,18 +45,6 @@ import com.google.gson.JsonPrimitive;
  * stored as normal JSON arrays.
  */
 public class THJSONtoJSONConverter implements THJSONListener {
-
-	private interface Acceptor {
-		void onString(String s);
-
-		void onFloat(float f);
-
-		void onInteger(int i);
-
-		void onBoolean(boolean b);
-
-		void onNull();
-	}
 
 	private final Stack<JsonElement> stack = new Stack<>();
 	private final JsonObject json = new JsonObject();
@@ -81,13 +67,12 @@ public class THJSONtoJSONConverter implements THJSONListener {
 	}
 
 	@Override
-	public void beginObject(byte[] src, int key, int keyLength, int clazz, int clazzLength) {
+	public void beginObject(String key, String clazz) {
 		stack.push(current);
 		JsonObject newCurrent = new JsonObject();
-		String keyString = new String(src, key, keyLength, StandardCharsets.UTF_8);
-		((JsonObject) current).add(keyString, newCurrent);
+		((JsonObject) current).add(key, newCurrent);
 		current = newCurrent;
-		newCurrent.addProperty("class", new String(src, clazz, clazzLength, StandardCharsets.UTF_8));
+		newCurrent.addProperty("class", clazz);
 	}
 
 	@Override
@@ -101,134 +86,72 @@ public class THJSONtoJSONConverter implements THJSONListener {
 	}
 
 	@Override
-	public void property(byte[] src, int key, int keyLength, byte[] valueSrc, THJSONPrimitiveType type, int value, int valueLength) {
-		String keyString = new String(src, key, keyLength, StandardCharsets.UTF_8);
-		onValue(type, valueSrc, value, valueLength, new Acceptor() {
-			@Override
-			public void onString(String s) {
-				((JsonObject) current).addProperty(keyString, s);
-			}
-
-			@Override
-			public void onFloat(float f) {
-				((JsonObject) current).addProperty(keyString, f);
-			}
-
-			@Override
-			public void onInteger(int i) {
-				((JsonObject) current).addProperty(keyString, i);
-			}
-
-			@Override
-			public void onBoolean(boolean b) {
-				((JsonObject) current).addProperty(keyString, b);
-			}
-
-			@Override
-			public void onNull() {
-				((JsonObject) current).add(keyString, JsonNull.INSTANCE);
-			}
-		});
-	}
-
-	private void onValue(THJSONPrimitiveType type, byte[] src, int start, int length, Acceptor a) {
-		if (type == THJSONPrimitiveType.NULL) {
-			a.onNull();
-			return;
-		}
-		String value = new String(src, start, length, StandardCharsets.UTF_8);
-		switch (type) {
-			case BOOLEAN:
-				a.onBoolean(Boolean.parseBoolean(value));
-				break;
-			case FLOAT:
-				try {
-					a.onFloat(Float.parseFloat(value));
-				} catch (NumberFormatException e) {
-					// Treat as string instead
-					a.onString(value);
-				}
-				break;
-			case INTEGER:
-				if (value.startsWith("0x")) {
-					// Unsigned hex integer
-					try {
-						a.onInteger(Integer.parseUnsignedInt(value.substring(2), 16));
-					} catch (NumberFormatException e) {
-						// Treat as string instead
-						a.onString(value);
-					}
-				} else if (value.startsWith("%")) {
-					// Unsigned binary integer
-					try {
-						a.onInteger(Integer.parseUnsignedInt(value.substring(1), 2));
-					} catch (NumberFormatException e) {
-						// Treat as string instead
-						a.onString(value);
-					}
-				} else {
-					a.onInteger(Integer.parseInt(value));
-				}
-				break;
-			default:
-				a.onString(value);
-		}
+	public void property(String key, boolean value) {
+		((JsonObject) current).addProperty(key, value);
 	}
 
 	@Override
-	public void value(byte[] src, THJSONPrimitiveType type, int value, int valueLength) {
-		onValue(type, src, value, valueLength, new Acceptor() {
-			@Override
-			public void onString(String s) {
-				((JsonArray) current).add(new JsonPrimitive(s));
-			}
-
-			@Override
-			public void onFloat(float f) {
-				((JsonArray) current).add(new JsonPrimitive(f));
-			}
-
-			@Override
-			public void onInteger(int i) {
-				((JsonArray) current).add(new JsonPrimitive(i));
-			}
-
-			@Override
-			public void onBoolean(boolean b) {
-				((JsonArray) current).add(new JsonPrimitive(b));
-			}
-
-			@Override
-			public void onNull() {
-				((JsonArray) current).add(JsonNull.INSTANCE);
-			}
-		});
+	public void property(String key, float value) {
+		((JsonObject) current).addProperty(key, value);
 	}
 
 	@Override
-	public void beginArray(byte[] src, int key, int keyLength) {
+	public void property(String key, int value, IntegerType type) {
+		((JsonObject) current).addProperty(key, value);
+	}
+
+	@Override
+	public void property(String key, String value, StringType type) {
+		((JsonObject) current).addProperty(key, value);
+	}
+
+	@Override
+	public void nullProperty(String key) {
+		((JsonObject) current).add(key, JsonNull.INSTANCE);
+	}
+
+	@Override
+	public void value(boolean value) {
+		((JsonArray) current).add(value);
+	}
+
+	@Override
+	public void value(float value) {
+		((JsonArray) current).add(value);
+	}
+
+	@Override
+	public void value(int value, IntegerType type) {
+		((JsonArray) current).add(value);
+	}
+
+	@Override
+	public void value(String value, StringType type) {
+		((JsonArray) current).add(value);
+	}
+
+	@Override
+	public void nullValue() {
+		((JsonArray) current).add(JsonNull.INSTANCE);
+	}
+
+	@Override
+	public void beginArray(String key) {
 		stack.push(current);
 		JsonArray newCurrent = new JsonArray();
-		String keyString = new String(src, key, keyLength, StandardCharsets.UTF_8);
-		((JsonObject) current).add(keyString, newCurrent);
+		((JsonObject) current).add(key, newCurrent);
 		current = newCurrent;
 	}
 
 	@Override
-	public void beginList(byte[] src, int key, int keyLength, int clazz, int clazzLength) {
+	public void beginList(String key, String clazz) {
 		stack.push(current);
 
 		// Create a special "array" object
 		JsonObject array = new JsonObject();
 		array.addProperty("class", "array");
-		String typeString = new String(src, clazz, clazzLength, StandardCharsets.UTF_8);
-		array.addProperty("type", typeString);
-		if (current instanceof JsonObject) {
-			String keyString = new String(src, key, keyLength, StandardCharsets.UTF_8);
-			((JsonObject) current).add(keyString, array);
-		} else {
-			((JsonArray) current).add(array);
-		}
+		array.addProperty("type", clazz);
+		((JsonObject) current).add(key, array);
 
 		stack.push(array);
 
@@ -251,7 +174,7 @@ public class THJSONtoJSONConverter implements THJSONListener {
 	}
 
 	@Override
-	public void beginArrayValue(byte[] src) {
+	public void beginArrayValue() {
 		stack.push(current);
 		JsonArray newCurrent = new JsonArray();
 		((JsonArray) current).add(newCurrent);
@@ -259,14 +182,13 @@ public class THJSONtoJSONConverter implements THJSONListener {
 	}
 
 	@Override
-	public void beginListValue(byte[] src, int clazz, int clazzLength) {
+	public void beginListValue(String clazz) {
 		stack.push(current);
 
 		// Create a special "array" object
 		JsonObject array = new JsonObject();
 		array.addProperty("class", "array");
-		String typeString = new String(src, clazz, clazzLength, StandardCharsets.UTF_8);
-		array.addProperty("type", typeString);
+		array.addProperty("type", clazz);
 		((JsonArray) current).add(array);
 
 		stack.push(array);
@@ -277,44 +199,28 @@ public class THJSONtoJSONConverter implements THJSONListener {
 	}
 
 	@Override
-	public void beginMap(byte[] src, int key, int keyLength) {
+	public void beginMap(String key) {
 		stack.push(current);
 		JsonObject newCurrent = new JsonObject();
-		String keyString = new String(src, key, keyLength, StandardCharsets.UTF_8);
-		((JsonObject) current).add(keyString, newCurrent);
+		((JsonObject) current).add(key, newCurrent);
 		current = newCurrent;
 	}
 
 	@Override
-	public void beginMapValue(byte[] src) {
-		stack.push(current);
-		JsonObject newCurrent = new JsonObject();
-		((JsonArray) current).add(newCurrent);
-		current = newCurrent;
-	}
-
-	@Override
-	public void beginObjectValue(byte[] src, int clazz, int clazzLength) {
+	public void beginMapValue() {
 		stack.push(current);
 		JsonObject newCurrent = new JsonObject();
 		((JsonArray) current).add(newCurrent);
 		current = newCurrent;
-		newCurrent.addProperty("class", new String(src, clazz, clazzLength, StandardCharsets.UTF_8));
 	}
 
 	@Override
-	public void comment(byte[] src, int start, int length, THJSONCommentType type) {
-		System.out.println("COMMENT:" + new String(src, start, length, StandardCharsets.UTF_8) + "<");
+	public void beginObjectValue(String clazz) {
+		stack.push(current);
+		JsonObject newCurrent = new JsonObject();
+		((JsonArray) current).add(newCurrent);
+		current = newCurrent;
+		newCurrent.addProperty("class", clazz);
 	}
 
-	@Override
-	public void directive(byte[] src, int start, int length) {
-		System.out.println("DIRECTIVE:" + new String(src, start, length, StandardCharsets.UTF_8) + "<");
-	}
-
-	@Override
-	public String function(byte[] src, int start, int length) {
-		System.out.println("FUNCTION CALL:" + new String(src, start, length, StandardCharsets.UTF_8) + "<");
-		return "";
-	}
 }
