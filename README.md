@@ -17,7 +17,7 @@ Each has advantages and disadvantages for various use cases. But what if you wan
 use cases?
 
 INI files can't handle any kind of nested structure. The only concept is blocks of key=value pairs where each value must
-fit on a single line. It allows comments
+fit on a single line. It allows comments.
 
 XML files are huge and verbose, and the syntax is unnecessarily pernickety for human beings to write. It is well-specified
 but bloated with features that can tie you in knots. It does cope with arbitrarily complex data well, though this can be
@@ -58,11 +58,6 @@ conform to the type - indeed we don't do anything with the class type name other
 
     inventory: item [sword, axe, shoes, tea, "no tea"]
     
-The streaming parser presented here is pretty high-speed and generates almost no garbage. In fact it only even has to
-allocate any objects if you start using escapes in string data. It otherwise accepts UTF-8 data as a byte[] array, which
-can be in either Windows, *nix or Mac line ending format, and will fire off a streamed sequence of events to a listener
-pointing at subsections of the input array as tokens.
-
 In the git repository there's an example listener that converts the stream of tokens into a Google Json object. Classes
 are converted into JSON objects by simply creating a property called "class":
 
@@ -87,9 +82,6 @@ Lists create an object of class "array" with a property "elements":
         }
 
 That's not the "definitive" way to do it but it's what the example listener does. That's about it really.
-
-Note that there isn't a complementary THJSON writer in this repository... the stream reader presented here is "lossy" in
-that it discards comments and whitespace. It probably wouldn't be too hard to create a writer. Maybe that's next.
 
 Cas :)
 
