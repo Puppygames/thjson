@@ -235,6 +235,9 @@ public class THJSONReader {
 			case MULTILINE_STRING:
 				listener.property(key, value.getString(), StringType.MULTI_LINE);
 				break;
+			case MULTILINE_BYTES:
+				listener.property(key, value.getBytes(), StringType.MULTI_LINE);
+				break;
 			case NULL:
 				listener.nullProperty(key);
 				break;
@@ -243,6 +246,9 @@ public class THJSONReader {
 				break;
 			case STRING:
 				listener.property(key, value.getString(), StringType.SINGLE_LINE);
+				break;
+			case BYTES:
+				listener.property(key, value.getBytes(), StringType.SINGLE_LINE);
 				break;
 			default:
 				assert false : value;
@@ -271,6 +277,9 @@ public class THJSONReader {
 			case MULTILINE_STRING:
 				listener.value(value.getString(), StringType.MULTI_LINE);
 				break;
+			case MULTILINE_BYTES:
+				listener.value(value.getBytes(), StringType.MULTI_LINE);
+				break;
 			case NULL:
 				listener.nullValue();
 				break;
@@ -279,6 +288,9 @@ public class THJSONReader {
 				break;
 			case STRING:
 				listener.value(value.getString(), StringType.SINGLE_LINE);
+				break;
+			case BYTES:
+				listener.value(value.getBytes(), StringType.SINGLE_LINE);
 				break;
 			default:
 				assert false : value;
@@ -436,8 +448,8 @@ public class THJSONReader {
 				// Parse result!
 				new THJSONReader(new ByteArrayInputStream(result.getBytes(UTF_8)), listener, recursionLevel + 1).readMemberValue(key);
 				return;
-			} else if (!t.getType().isLiteral() && !(t.getType() == TokenType.STRING || t.getType() == TokenType.MULTILINE_STRING)) {
-				throw new IOException("Unexpected " + t + " when expecting literal or string value at line " + tokenizer.getLine() + ":" + tokenizer.getCol());
+			} else if (!t.getType().isLiteral() && !(t.getType() == TokenType.STRING || t.getType() == TokenType.MULTILINE_STRING || t.getType() == TokenType.BYTES || t.getType() == TokenType.MULTILINE_BYTES)) {
+				throw new IOException("Unexpected " + t + " when expecting literal or string or bytes value at line " + tokenizer.getLine() + ":" + tokenizer.getCol());
 			}
 
 			read();
@@ -522,7 +534,7 @@ public class THJSONReader {
 				// Parse result!
 				new THJSONReader(new ByteArrayInputStream(result.getBytes(UTF_8)), listener, recursionLevel + 1).readArrayValue();
 				return;
-			} else if (!t.getType().isLiteral() && !(t.getType() == TokenType.STRING || t.getType() == TokenType.MULTILINE_STRING)) {
+			} else if (!t.getType().isLiteral() && !(t.getType() == TokenType.STRING || t.getType() == TokenType.MULTILINE_STRING || t.getType() == TokenType.BYTES || t.getType() == TokenType.MULTILINE_BYTES)) {
 				throw new IOException("Unexpected " + t + " when expecting literal or string value at line " + tokenizer.getLine() + ":" + tokenizer.getCol());
 			}
 

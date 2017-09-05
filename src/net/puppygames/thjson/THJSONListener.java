@@ -100,6 +100,8 @@ public interface THJSONListener {
 
 	void value(String value, StringType type);
 
+	void value(byte[] value, StringType type);
+
 	void value(boolean value);
 
 	void value(float value);
@@ -109,6 +111,8 @@ public interface THJSONListener {
 	void property(String key, int value, IntegerType type);
 
 	void property(String key, String value, StringType type);
+
+	void property(String key, byte[] value, StringType type);
 
 	void property(String key, boolean value);
 

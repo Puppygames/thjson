@@ -110,6 +110,15 @@ public class THJSONtoMapConverter implements THJSONListener {
 
 	@SuppressWarnings("unchecked")
 	@Override
+	public void property(String key, byte[] value, StringType type) {
+		if (debug) {
+			System.out.println(type + " PROPERTY " + key + "=" + value + "<");
+		}
+		((Map<String, Object>) current).put(key, value);
+	}
+
+	@SuppressWarnings("unchecked")
+	@Override
 	public void nullProperty(String key) {
 		if (debug) {
 			System.out.println("PROPERTY " + key + "=null");
@@ -147,6 +156,15 @@ public class THJSONtoMapConverter implements THJSONListener {
 	@SuppressWarnings("unchecked")
 	@Override
 	public void value(String value, StringType type) {
+		if (debug) {
+			System.out.println(type + " VALUE " + value);
+		}
+		((List<Object>) current).add(value);
+	}
+
+	@SuppressWarnings("unchecked")
+	@Override
+	public void value(byte[] value, StringType type) {
 		if (debug) {
 			System.out.println(type + " VALUE " + value);
 		}

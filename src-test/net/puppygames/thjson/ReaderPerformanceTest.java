@@ -3,6 +3,8 @@ package net.puppygames.thjson;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 
 public class ReaderPerformanceTest {
 
@@ -16,14 +18,14 @@ public class ReaderPerformanceTest {
 	}
 
 	public void run() throws IOException {
-		//RepeatingInputStream ris = new RepeatingInputStream(() -> THJSONTokenizerTest.class.getResourceAsStream("test2.thjson"), 100000);
+		// RepeatingInputStream ris = new RepeatingInputStream(() -> THJSONTokenizerTest.class.getResourceAsStream("test2.thjson"), 100000);
 		RepeatingInputStream ris = new RepeatingInputStream(() -> {
 			try {
 				return new FileInputStream("c:/Projects/thjson/src/net/puppygames/thjson/test2.thjson");
 			} catch (FileNotFoundException e) {
 				return null;
 			}
-		}, 100000);
+		}, 100);
 		THJSONReader reader = new THJSONReader(ris, new THJSONListener() {
 
 			@Override
@@ -38,6 +40,12 @@ public class ReaderPerformanceTest {
 
 			@Override
 			public void value(String value, StringType type) {
+				tokens++;
+			}
+
+			@Override
+			public void value(byte[] value, StringType type) {
+				System.out.println(new String(Base64.getEncoder().encode(value), StandardCharsets.UTF_8));
 				tokens++;
 			}
 
@@ -58,6 +66,12 @@ public class ReaderPerformanceTest {
 
 			@Override
 			public void property(String key, String value, StringType type) {
+				tokens++;
+			}
+
+			@Override
+			public void property(String key, byte[] value, StringType type) {
+				System.out.println(new String(Base64.getEncoder().encode(value), StandardCharsets.UTF_8));
 				tokens++;
 			}
 

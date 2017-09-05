@@ -6,8 +6,21 @@
 	float: .1
   escapes: "Testing escapés\nLike a boss\tTabs too! \"Great\" isn't it"
   
-	
+	base64test: `abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/`
+	multilineBase64test:
+	  <<<
+	  abcdefghijklmnopqrstuvwxyz
+	  ABCDEFGHIJKLMNOPQRSTUVWXYZ
+	  0123456789+/
+	  >>>
 
+	base641:`YW55IGNhcm5hbCBwbGVhcw`
+	base642:`YW55IGNhcm5hbCBwbGVhc3U`
+	base643:`YW55IGNhcm5hbCBwbGVhc3Vy`
+	base644:`YW55IGNhcm5hbCBwbGVhcw==`
+	base645:`YW55IGNhcm5hbCBwbGVhc3U=`
+	base646:`YW55IGNhcm5hbCBwbGVhc3Vy`
+	
   spacesAndQuotésInClassNames: are_not_allowed { because: "we're cool" }
      
   # This is a class called "clazz"

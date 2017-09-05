@@ -1,5 +1,9 @@
 package net.puppygames.thjson;
 
+import static java.nio.charset.StandardCharsets.*;
+
+import java.util.Base64;
+
 /**
  * A THJSON Token, which is read from a {@link THJSONTokenizer}
  */
@@ -29,6 +33,7 @@ public class Token {
 	private final TokenType type;
 
 	private String string;
+	private byte[] bytes;
 	private boolean bool;
 	private int integer;
 	private float number;
@@ -60,6 +65,11 @@ public class Token {
 		this.type = type;
 	}
 
+	public Token(byte[] bytes, TokenType type) {
+		this.bytes = bytes;
+		this.type = type;
+	}
+
 	public Token(int integer, TokenType type) {
 		this.integer = integer;
 		this.type = type;
@@ -73,6 +83,10 @@ public class Token {
 
 	public String getString() {
 		return string;
+	}
+
+	public byte[] getBytes() {
+		return bytes;
 	}
 
 	public boolean getBoolean() {
@@ -120,6 +134,8 @@ public class Token {
 				return Integer.toString(integer);
 			case MULTILINE_STRING:
 				return "'''" + string + "'''";
+			case MULTILINE_BYTES:
+				return "===" + new String(Base64.getEncoder().encode(bytes), UTF_8) + "===";
 			case NULL:
 				return "null";
 			case SIGNED:
@@ -128,6 +144,8 @@ public class Token {
 				return "//" + string;
 			case STRING:
 				return string;
+			case BYTES:
+				return "`" + new String(Base64.getEncoder().encode(bytes), UTF_8) + "`";
 			default:
 				assert false : type;
 				return "";

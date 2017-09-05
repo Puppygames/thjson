@@ -1,6 +1,7 @@
 package net.puppygames.thjson;
 
 import static java.lang.System.*;
+import static java.nio.charset.StandardCharsets.*;
 import static java.util.Objects.*;
 import static net.puppygames.thjson.TokenType.*;
 
@@ -9,6 +10,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Base64;
 
 /**
  * Takes THJSON-formatted input from an {@link InputStream} and turns it into tokens which can be listened for.
@@ -298,10 +300,19 @@ public class THJSONTokenizer {
 			case '"':
 				// Quoted string
 				return readQuotedString();
+			case '`':
+				// Quoted bytes
+				return readQuotedBytes();
 			case '\'':
 				// Maybe multiline string
 				if (in.peek(0) == '\'' && in.peek(1) == '\'') {
 					return readMultilineString();
+				}
+				break;
+			case '<':
+				// Maybe multiline bytes
+				if (in.peek(0) == '<' && in.peek(1) == '<') {
+					return readMultilineBytes();
 				}
 				break;
 			case '@':
@@ -391,6 +402,30 @@ public class THJSONTokenizer {
 		}
 	}
 
+	private Token readQuotedBytes() throws IOException {
+		int c;
+		for (;;) {
+			c = in.read();
+			switch (c) {
+				case -1:
+					throw new EOFException("Unexpected EOF reading quoted bytes at line " + getLine() + ":" + getCol());
+				case '\n':
+					throw new EOFException("Unexpected end of line reading quoted bytes at line " + getLine() + ":" + getCol());
+				case '`':
+					// End the bytes
+					return new Token(Base64.getDecoder().decode(getToken(false, false).getBytes(UTF_8)), TokenType.BYTES);
+				default:
+					// Only allow valid Base64 characters: A-Z,a-z,0-9,\+
+					if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=') {
+						// Simply append to string so far
+						token.append((char) c);
+					} else {
+						throw new IOException("Expected base64 character but got " + (char) c + " at line " + getLine() + ":" + getCol());
+					}
+			}
+		}
+	}
+
 	private Token readQuotedDirective() throws IOException {
 		int c;
 		for (;;) {
@@ -457,6 +492,55 @@ public class THJSONTokenizer {
 					}
 					if (getCol() >= align || !isWhitespace(ch)) {
 						token.append(ch);
+					}
+			}
+		}
+	}
+
+	private Token readMultilineBytes() throws IOException {
+		align = getCol();
+		row = getLine();
+		in.read();
+		in.read();
+		for (;;) {
+			int c = in.read();
+			switch (c) {
+				case -1:
+					throw new EOFException("Unexpected EOF reading multiline bytes at line " + getLine() + ":" + getCol());
+				case '>':
+					if (in.peek(0) == '>' && in.peek(1) == '>') {
+						// Got it all. Ditch the equalses
+						in.read();
+						in.read();
+						// Trim off the whitespace up to and including the last \n - unless there's no terminating \n at all
+						for (int i = token.length(); --i >= 0;) {
+							c = token.charAt(i);
+							if (!isWhitespace(c)) {
+								break;
+							}
+							if (c == '\n') {
+								token.setLength(i);
+								break;
+							}
+						}
+						return new Token(Base64.getDecoder().decode(token.toString().getBytes(UTF_8)), TokenType.MULTILINE_BYTES);
+					}
+					// Intentional fallthrough
+				default:
+					char ch = (char) c;
+					if (token.length() == 0 && isWhitespace(c) && row == getLine()) {
+						// Ignore the initial whitespace on the first line if we've not got any characters yet
+						continue;
+					}
+					if (getCol() >= align || !isWhitespace(ch)) {
+						// Only allow valid Base64 characters: A-Z,a-z,0-9,\+
+						if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=') {
+							token.append(ch);
+						} else if (isWhitespace(c)) {
+							// If we hit whitespace, ignore it
+						} else {
+							throw new IOException("Expected base64 character but got " + (char) c + " at line " + getLine() + ":" + getCol());
+						}
 					}
 			}
 		}

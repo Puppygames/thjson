@@ -38,7 +38,9 @@ package net.puppygames.thjson;
 public enum TokenType {
 	//@formatter:off
 	STRING(DataType.STRING, false, false),
+	BYTES(DataType.BYTES, false, false),
 	MULTILINE_STRING(DataType.STRING, false, false),
+	MULTILINE_BYTES(DataType.BYTES, false, false),
 	HASH_COMMENT(DataType.STRING, false, true),
 	SLASHSLASH_COMMENT(DataType.STRING, false, true),
 	BLOCK_COMMENT(DataType.STRING, false, true),

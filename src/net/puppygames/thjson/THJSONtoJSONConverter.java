@@ -32,6 +32,8 @@ POSSIBILITY OF SUCH DAMAGE.
 
 package net.puppygames.thjson;
 
+import static java.nio.charset.StandardCharsets.*;
+
 import java.util.Stack;
 
 import com.google.gson.JsonArray;
@@ -106,6 +108,11 @@ public class THJSONtoJSONConverter implements THJSONListener {
 	}
 
 	@Override
+	public void property(String key, byte[] value, StringType type) {
+		((JsonObject) current).addProperty(key, new String(value, UTF_8));
+	}
+
+	@Override
 	public void nullProperty(String key) {
 		((JsonObject) current).add(key, JsonNull.INSTANCE);
 	}
@@ -128,6 +135,11 @@ public class THJSONtoJSONConverter implements THJSONListener {
 	@Override
 	public void value(String value, StringType type) {
 		((JsonArray) current).add(value);
+	}
+
+	@Override
+	public void value(byte[] value, StringType type) {
+		((JsonArray) current).add(new String(value, UTF_8));
 	}
 
 	@Override
