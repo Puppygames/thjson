@@ -81,7 +81,23 @@ Lists create an object of class "array" with a property "elements":
             ]
         }
 
-That's not the "definitive" way to do it but it's what the example listener does. That's about it really.
+That's not the "definitive" way to do it but it's what the example listener does.
 
-Cas :)
+Finally I've added a way to handle binary data markup. You can now encode binary data as Base64, tagged in back-apostrophes or whatever they're called on a single line:
+
+	base641:`YW55IGNhcm5hbCBwbGVhcw`
+	base642:`YW55IGNhcm5hbCBwbGVhc3U`
+	base643:`YW55IGNhcm5hbCBwbGVhc3Vy`
+	base644:`YW55IGNhcm5hbCBwbGVhcw==`
+	base645:`YW55IGNhcm5hbCBwbGVhc3U=`
+	base646:`YW55IGNhcm5hbCBwbGVhc3Vy`
+
+Or if you've got a lot of binary data, you can use multiline - but be aware there are no escapes in multiline binary data. Although you can add comments in it, if you're basically insane:
+
+	multilineBase64test:
+	  <<<
+	  abcdefghijklmnopqrstuvwxyz
+	  ABCDEFGHIJKLMNOPQRSTUVWXYZ
+	  0123456789+/
+	  >>>
 
