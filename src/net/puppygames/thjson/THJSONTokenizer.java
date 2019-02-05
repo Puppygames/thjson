@@ -1,9 +1,16 @@
 package net.puppygames.thjson;
 
-import static java.lang.System.*;
-import static java.nio.charset.StandardCharsets.*;
-import static java.util.Objects.*;
-import static net.puppygames.thjson.TokenType.*;
+import static java.lang.System.arraycopy;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.util.Objects.requireNonNull;
+import static net.puppygames.thjson.TokenType.BINARY;
+import static net.puppygames.thjson.TokenType.BOOLEAN;
+import static net.puppygames.thjson.TokenType.FLOAT;
+import static net.puppygames.thjson.TokenType.HEX;
+import static net.puppygames.thjson.TokenType.INTEGER;
+import static net.puppygames.thjson.TokenType.NULL;
+import static net.puppygames.thjson.TokenType.SIGNED;
+import static net.puppygames.thjson.TokenType.STRING;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -17,6 +24,8 @@ import java.util.Base64;
  */
 public class THJSONTokenizer {
 
+	private static final boolean ALLOW_DELIMETERS_IN_QUOTELESS_STRINGS = false; // Set to true for HJSON behaviour
+
 	/** Initial readahead size... should be big enough */
 	private static final int READAHEAD_SIZE = 3;
 
@@ -25,8 +34,17 @@ public class THJSONTokenizer {
 	 * @param c
 	 * @return true if c is a space, tab, newline, backspace, formfeed, or carriage return
 	 */
-	static boolean isWhitespace(int c) {
+	public static boolean isWhitespace(int c) {
 		return c == ' ' || c == '\t' || c == '\n';
+	}
+
+	/**
+	 * Determines if the incoming character requires quotes if it is found in a string
+	 * @param c
+	 * @return true if c is whitespace or a token delimiter
+	 */
+	public static boolean requiresQuotes(int c) {
+		return " \t\n{}[],:#\\\"".indexOf(c) != -1;
 	}
 
 	private static boolean isBinaryDigit(char c) {
@@ -73,7 +91,7 @@ public class THJSONTokenizer {
 		}
 
 		// Otherwise, first char must be a digit or a dot
-		if (src.charAt(start) != '.' && !isDecimalDigit(src.charAt(start))) {
+		if (src.length() <= start || (src.charAt(start) != '.' && !isDecimalDigit(src.charAt(start)))) {
 			// Nope, so 'tis a string
 			return STRING;
 		}
@@ -174,6 +192,8 @@ public class THJSONTokenizer {
 
 	/** Token queue */
 	private Token[] peekQueue = new Token[READAHEAD_SIZE];
+	private int[] peekQueueLine = new int[READAHEAD_SIZE];
+	private int[] peekQueueCol = new int[READAHEAD_SIZE];
 
 	/** Peek queue length */
 	private int peekLength;
@@ -183,6 +203,15 @@ public class THJSONTokenizer {
 
 	/** Multiline quotes row */
 	private int row;
+
+	/** Current line/col */
+	private int line, col;
+
+	/** Position listener */
+	private PositionListener listener;
+
+	/** Describe the stream's identity */
+	private String source;
 
 	/**
 	 * C'tor
@@ -202,6 +231,22 @@ public class THJSONTokenizer {
 
 	/* --- */
 
+	/**
+	 * Sets or clears the position listener
+	 * @param listener May be null
+	 */
+	public void setListener(PositionListener listener) {
+		this.listener = listener;
+	}
+
+	public void setSource(String source) {
+		this.source = source;
+	}
+
+	public String getSource() {
+		return source;
+	}
+
 	public void setTabSize(int tabSize) {
 		in.setTabSize(tabSize);
 	}
@@ -211,11 +256,11 @@ public class THJSONTokenizer {
 	}
 
 	public int getLine() {
-		return in.getLine();
+		return line;
 	}
 
 	public int getCol() {
-		return in.getCol();
+		return col;
 	}
 
 	/**
@@ -227,9 +272,13 @@ public class THJSONTokenizer {
 	public Token peek(int ahead) throws IOException {
 		if (peekQueue.length <= ahead) {
 			peekQueue = Arrays.copyOf(peekQueue, ahead + 1);
+			peekQueueLine = Arrays.copyOf(peekQueueLine, ahead + 1);
+			peekQueueCol = Arrays.copyOf(peekQueueCol, ahead + 1);
 		}
 		for (int i = peekLength; i <= ahead; i++) {
 			peekQueue[i] = readToken();
+			peekQueueLine[i] = line;
+			peekQueueCol[i] = col;
 			peekLength++;
 		}
 		return peekQueue[ahead];
@@ -245,11 +294,19 @@ public class THJSONTokenizer {
 		Token ret;
 		if (peekLength > 0) {
 			ret = peekQueue[0];
+			line = peekQueueLine[0];
+			col = peekQueueCol[0];
 			arraycopy(peekQueue, 1, peekQueue, 0, --peekLength);
+			arraycopy(peekQueueLine, 1, peekQueueLine, 0, peekLength);
+			arraycopy(peekQueueCol, 1, peekQueueCol, 0, peekLength);
 		} else {
 			ret = readToken();
 		}
 
+		// Note the position
+		if (listener != null) {
+			listener.onPosition(source, line, col);
+		}
 		return ret;
 	}
 
@@ -267,6 +324,11 @@ public class THJSONTokenizer {
 		do {
 			c = in.read();
 		} while (isWhitespace(c));
+
+		// Now note position
+		line = in.getLine();
+		col = in.getCol();
+
 		if (c == -1) {
 			return Token.EOF;
 		}
@@ -277,17 +339,18 @@ public class THJSONTokenizer {
 				return Token.OPEN_CURLY_BRACKET;
 			case '[':
 				return Token.OPEN_SQUARE_BRACKET;
+			case '(':
+				return Token.OPEN_ROUND_BRACKET;
 			case '}':
 				return Token.CLOSE_CURLY_BRACKET;
 			case ']':
 				return Token.CLOSE_SQUARE_BRACKET;
+			case ')':
+				return Token.CLOSE_ROUND_BRACKET;
 			case ':':
 				return Token.COLON;
 			case ',':
 				return Token.COMMA;
-			case '#':
-				// Hash comment. Read to end of line
-				return readSingleLineComment(TokenType.HASH_COMMENT);
 			case '/':
 				// Maybe C or C++ style comment
 				if (in.peek(0) == '/') {
@@ -315,7 +378,7 @@ public class THJSONTokenizer {
 					return readMultilineBytes();
 				}
 				break;
-			case '@':
+			case '#':
 				// Directive
 				if (in.peek(0) == '"') {
 					in.read();
@@ -347,7 +410,7 @@ public class THJSONTokenizer {
 		for (;;) {
 			c = in.read();
 			if (c == -1) {
-				throw new EOFException("Unexpected EOF reading block comment at line " + getLine() + ":" + getCol());
+				throw new EOFException("Unexpected EOF reading block comment at line " + getLine() + ":" + getCol() + " in " + source);
 			}
 			token.append((char) c);
 			if (c == '*' && in.peek(0) == '/') {
@@ -361,18 +424,45 @@ public class THJSONTokenizer {
 		int c;
 		for (;;) {
 			c = in.peek(0);
-			if (c == -1) {
-				throw new EOFException("Unexpected EOF reading directive at line " + getLine() + ":" + getCol());
-			}
 			if (c == ',') {
 				// Consume commas
 				in.read();
-			}
-			if (c == '\n' || c == ',' || c == ':' || c == '{' || c == '}' || c == '[' || c == ']' || c == '#' || (c == '/' && (in.peek(1) == '/' || in.peek(1) == '*'))) {
+			} else if (c == -1 || c == '\n' || c == ',' || c == ':' || c == '{' || c == '}' || c == '[' || c == ']' || c == '#' || (c == '/' && (in.peek(1) == '/' || in.peek(1) == '*'))) {
 				// End the directive at a delimiter or comment
 				return new Token(getToken(true, true), TokenType.DIRECTIVE);
+			} else {
+				token.append((char) in.read());
+				if (c == '"') {
+					// Start reading a string.
+					readStringInDirective();
+				}
 			}
-			token.append((char) in.read());
+		}
+	}
+
+	private void readStringInDirective() throws IOException {
+		int c;
+		for (;;) {
+			c = in.read();
+			switch (c) {
+				case -1:
+					throw new EOFException("Unexpected EOF reading quoted string in directive at line " + getLine() + ":" + getCol() + " in " + source);
+				case '\n':
+					throw new EOFException("Unexpected end of line reading quoted string in directive at line " + getLine() + ":" + getCol() + " in " + source);
+				case '\\':
+					// Escape sequence
+					readEscape();
+					break;
+				default:
+					if (c > 0x7F) {
+						c = ((c & 0b11111) << 6) | (in.read() & 0b111111);
+					}
+					// Simply append to string so far
+					token.append((char) c);
+					if (c == '"') {
+						return;
+					}
+			}
 		}
 	}
 
@@ -382,9 +472,9 @@ public class THJSONTokenizer {
 			c = in.read();
 			switch (c) {
 				case -1:
-					throw new EOFException("Unexpected EOF reading quoted string at line " + getLine() + ":" + getCol());
+					throw new EOFException("Unexpected EOF reading quoted string at line " + getLine() + ":" + getCol() + " in " + source);
 				case '\n':
-					throw new EOFException("Unexpected end of line reading quoted string at line " + getLine() + ":" + getCol());
+					throw new EOFException("Unexpected end of line reading quoted string at line " + getLine() + ":" + getCol() + " in " + source);
 				case '"':
 					// End the string
 					return new Token(getToken(false, false), TokenType.STRING);
@@ -408,9 +498,9 @@ public class THJSONTokenizer {
 			c = in.read();
 			switch (c) {
 				case -1:
-					throw new EOFException("Unexpected EOF reading quoted bytes at line " + getLine() + ":" + getCol());
+					throw new EOFException("Unexpected EOF reading quoted bytes at line " + getLine() + ":" + getCol() + " in " + source);
 				case '\n':
-					throw new EOFException("Unexpected end of line reading quoted bytes at line " + getLine() + ":" + getCol());
+					throw new EOFException("Unexpected end of line reading quoted bytes at line " + getLine() + ":" + getCol() + " in " + source);
 				case '`':
 					// End the bytes
 					return new Token(Base64.getDecoder().decode(getToken(false, false).getBytes(UTF_8)), TokenType.BYTES);
@@ -420,7 +510,7 @@ public class THJSONTokenizer {
 						// Simply append to string so far
 						token.append((char) c);
 					} else {
-						throw new IOException("Expected base64 character but got " + (char) c + " at line " + getLine() + ":" + getCol());
+						throw new IOException("Expected base64 character but got " + (char) c + " at line " + getLine() + ":" + getCol() + " in " + source);
 					}
 			}
 		}
@@ -432,9 +522,9 @@ public class THJSONTokenizer {
 			c = in.read();
 			switch (c) {
 				case -1:
-					throw new EOFException("Unexpected EOF reading quoted directive at line " + getLine() + ":" + getCol());
+					throw new EOFException("Unexpected EOF reading quoted directive at line " + getLine() + ":" + getCol() + " in " + source);
 				case '\n':
-					throw new EOFException("Unexpected end of line reading quoted directive at line " + getLine() + ":" + getCol());
+					throw new EOFException("Unexpected end of line reading quoted directive at line " + getLine() + ":" + getCol() + " in " + source);
 				case '"':
 					// End the directive
 					return new Token(getToken(false, false), TokenType.DIRECTIVE);
@@ -461,7 +551,7 @@ public class THJSONTokenizer {
 			int c = in.read();
 			switch (c) {
 				case -1:
-					throw new EOFException("Unexpected EOF reading multiline string at line " + getLine() + ":" + getCol());
+					throw new EOFException("Unexpected EOF reading multiline string at line " + getLine() + ":" + getCol() + " in " + source);
 				case '\'':
 					if (in.peek(0) == '\'' && in.peek(1) == '\'') {
 						// Got it all. Ditch the quotes
@@ -506,10 +596,10 @@ public class THJSONTokenizer {
 			int c = in.read();
 			switch (c) {
 				case -1:
-					throw new EOFException("Unexpected EOF reading multiline bytes at line " + getLine() + ":" + getCol());
+					throw new EOFException("Unexpected EOF reading multiline bytes at line " + getLine() + ":" + getCol() + " in " + source);
 				case '>':
 					if (in.peek(0) == '>' && in.peek(1) == '>') {
-						// Got it all. Ditch the equalses
+						// Got it all. Ditch the angle brackets
 						in.read();
 						in.read();
 						// Trim off the whitespace up to and including the last \n - unless there's no terminating \n at all
@@ -539,7 +629,7 @@ public class THJSONTokenizer {
 						} else if (isWhitespace(c)) {
 							// If we hit whitespace, ignore it
 						} else {
-							throw new IOException("Expected base64 character but got " + (char) c + " at line " + getLine() + ":" + getCol());
+							throw new IOException("Expected base64 character but got " + (char) c + " at line " + getLine() + ":" + getCol() + " in " + source);
 						}
 					}
 			}
@@ -560,18 +650,19 @@ public class THJSONTokenizer {
 
 		for (;;) {
 			c = in.peek(0);
-			if (c == -1) {
-				throw new EOFException("Unexpected EOF reading key at " + getLine() + ":" + getCol());
-			}
+//			if (c == -1) {
+//				throw new EOFException("Unexpected EOF reading key at " + getLine() + ":" + getCol() + " in " + getSource());
+//			}
 
 			boolean append = false;
-			if (c == '\n') {
+			if (c == '\n' || c == -1) {
 				// That's the end
 			} else if (isWhitespace(c)) {
-				// Encountering other whitespace in the middle of a quoteless token means it is
-				hadWhitespace = true;
+				// In HJSON, encountering other whitespace in the middle of a quoteless token means it is going to go to the end of the line.
+				// This behaviour is a bit dangerous and causes very hard to spot parsing errors, so for now it's turned off
+				hadWhitespace = ALLOW_DELIMETERS_IN_QUOTELESS_STRINGS;
 				append = true;
-			} else if ("{}[],:#".indexOf(c) != -1) {
+			} else if ("{}()[],:".indexOf(c) != -1) {
 				if (consumeRestOfLine) {
 					// We are consuming the rest of the line
 					// blah blah [
@@ -607,34 +698,45 @@ public class THJSONTokenizer {
 				String value = getToken(false, true);
 				// What type is it?
 				TokenType type = determinePrimitiveType(value);
-				// Comma is only a delimiter if what we have read so far is a literal or number
-				if (c != ',' || (c == ',' && type.isLiteral())) {
+				// Comma is only a delimiter if what we have read so far is a literal or number or a string with no spaces
+				if (c != ',' || (c == ',' && (type.isLiteral() || !hadWhitespace))) {
 					if (c == ',') {
 						// Consume commas
 						in.read();
 					}
+					Token ret;
 					try {
 						switch (type) {
 							case NULL:
-								return Token.NULL;
+								ret = Token.NULL;
+								break;
 							case BOOLEAN:
-								return Boolean.parseBoolean(value) ? Token.TRUE : Token.FALSE;
+								ret = Boolean.parseBoolean(value) ? Token.TRUE : Token.FALSE;
+								break;
 							case INTEGER:
 							case SIGNED:
-								return new Token(Integer.parseInt(value), type);
+								ret = new Token(Integer.parseInt(value), type);
+								break;
 							case HEX:
-								return new Token(Integer.parseUnsignedInt(value.substring(2), 16), TokenType.HEX);
+								ret = new Token(Integer.parseUnsignedInt(value.substring(2), 16), TokenType.HEX);
+								break;
 							case BINARY:
-								return new Token(Integer.parseUnsignedInt(value.substring(1), 2), TokenType.BINARY);
+								ret = new Token(Integer.parseUnsignedInt(value.substring(1), 2), TokenType.BINARY);
+								break;
 							case FLOAT:
-								return new Token(Float.parseFloat(value));
+								ret = new Token(Float.parseFloat(value));
+								break;
 							default:
-								return new Token(value, TokenType.STRING);
+								ret = new Token(value, TokenType.STRING);
 						}
 					} catch (NumberFormatException e) {
 						// Stringify instead
-						return new Token(value, TokenType.STRING);
+						ret = new Token(value, TokenType.STRING);
 					}
+					if (c == '\n') {
+						ret.setEndOfLine();
+					}
+					return ret;
 				} else if (c == ',') {
 					// Append a comma after all
 					token.append(',');
@@ -648,7 +750,7 @@ public class THJSONTokenizer {
 		int c = in.read();
 		switch (c) {
 			case -1:
-				throw new EOFException("Unexpected EOF reading escape at " + getLine() + ":" + getCol());
+				throw new EOFException("Unexpected EOF reading escape at " + getLine() + ":" + getCol() + " in " + source);
 			case 'u':
 				// Unicode escape
 				token.append(readUnicodeEscape());
@@ -697,7 +799,7 @@ public class THJSONTokenizer {
 	private byte readHexDigit() throws IOException {
 		int c = in.read();
 		if (c == -1) {
-			throw new EOFException("Unexpected EOF expecting hex digit at line " + getLine() + ":" + getCol());
+			throw new EOFException("Unexpected EOF expecting hex digit at line " + getLine() + ":" + getCol() + " in " + source);
 		}
 		if (c >= '0' && c <= '9') {
 			return (byte) (c - '0');
@@ -708,7 +810,7 @@ public class THJSONTokenizer {
 		if (c >= 'A' && c <= 'F') {
 			return (byte) ((c - 'A') + 10);
 		}
-		throw new IOException("Expected hex digit but got " + (char) c + " at line " + getLine() + ":" + getCol());
+		throw new IOException("Expected hex digit but got " + (char) c + " at line " + getLine() + ":" + getCol() + " in " + source);
 	}
 
 	/**

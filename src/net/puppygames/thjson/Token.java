@@ -1,6 +1,6 @@
 package net.puppygames.thjson;
 
-import static java.nio.charset.StandardCharsets.*;
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 import java.util.Base64;
 
@@ -25,8 +25,10 @@ public class Token {
 	public static final Token COMMA = new Token(',');
 	public static final Token OPEN_SQUARE_BRACKET = new Token('[');
 	public static final Token OPEN_CURLY_BRACKET = new Token('{');
+	public static final Token OPEN_ROUND_BRACKET = new Token('(');
 	public static final Token CLOSE_SQUARE_BRACKET = new Token(']');
 	public static final Token CLOSE_CURLY_BRACKET = new Token('}');
+	public static final Token CLOSE_ROUND_BRACKET = new Token(')');
 
 	/* --- */
 
@@ -38,6 +40,7 @@ public class Token {
 	private int integer;
 	private float number;
 	private char delimiter;
+	private boolean endOfLine;
 
 	private Token(TokenType type) {
 		this.type = type;
@@ -121,13 +124,11 @@ public class Token {
 			case DELIMITER:
 				return String.valueOf(delimiter);
 			case DIRECTIVE:
-				return "@" + string;
+				return "#" + string;
 			case EOF:
 				return "EOF";
 			case FLOAT:
 				return Float.toString(number);
-			case HASH_COMMENT:
-				return "#" + string;
 			case HEX:
 				return "0x" + Integer.toHexString(integer);
 			case INTEGER:
@@ -135,7 +136,7 @@ public class Token {
 			case MULTILINE_STRING:
 				return "'''" + string + "'''";
 			case MULTILINE_BYTES:
-				return "===" + new String(Base64.getEncoder().encode(bytes), UTF_8) + "===";
+				return "<<<" + new String(Base64.getEncoder().encode(bytes), UTF_8) + ">>>";
 			case NULL:
 				return "null";
 			case SIGNED:
@@ -150,6 +151,14 @@ public class Token {
 				assert false : type;
 				return "";
 		}
+	}
+
+	public boolean isEndOfLine() {
+		return endOfLine;
+	}
+
+	public void setEndOfLine() {
+		endOfLine = true;
 	}
 
 }

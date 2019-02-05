@@ -32,7 +32,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 package net.puppygames.thjson;
 
-import static java.nio.charset.StandardCharsets.*;
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 import java.util.Stack;
 
@@ -185,11 +185,25 @@ public class THJSONtoJSONConverter implements THJSONListener {
 		current = stack.pop();
 	}
 
+	private void addChild(JsonElement newChild) {
+		if (current instanceof JsonArray) {
+			((JsonArray) current).add(newChild);
+		} else {
+			JsonObject currentObject = (JsonObject) current;
+			JsonArray children = currentObject.getAsJsonArray("children");
+			if (children == null) {
+				children = new JsonArray();
+				currentObject.add("children", children);
+			}
+			children.add(newChild);
+		}
+	}
+
 	@Override
 	public void beginArrayValue() {
 		stack.push(current);
 		JsonArray newCurrent = new JsonArray();
-		((JsonArray) current).add(newCurrent);
+		addChild(newCurrent);
 		current = newCurrent;
 	}
 
@@ -201,7 +215,8 @@ public class THJSONtoJSONConverter implements THJSONListener {
 		JsonObject array = new JsonObject();
 		array.addProperty("class", "array");
 		array.addProperty("type", clazz);
-		((JsonArray) current).add(array);
+
+		addChild(array);
 
 		stack.push(array);
 
@@ -222,7 +237,7 @@ public class THJSONtoJSONConverter implements THJSONListener {
 	public void beginMapValue() {
 		stack.push(current);
 		JsonObject newCurrent = new JsonObject();
-		((JsonArray) current).add(newCurrent);
+		addChild(newCurrent);
 		current = newCurrent;
 	}
 
@@ -230,7 +245,7 @@ public class THJSONtoJSONConverter implements THJSONListener {
 	public void beginObjectValue(String clazz) {
 		stack.push(current);
 		JsonObject newCurrent = new JsonObject();
-		((JsonArray) current).add(newCurrent);
+		addChild(newCurrent);
 		current = newCurrent;
 		newCurrent.addProperty("class", clazz);
 	}

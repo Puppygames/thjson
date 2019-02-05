@@ -1,6 +1,6 @@
 package net.puppygames.thjson;
 
-import static java.util.Objects.*;
+import static java.util.Objects.requireNonNull;
 
 import java.util.List;
 import java.util.Map;
@@ -22,9 +22,7 @@ public class MapToTHJSONConverter {
 
 	@SuppressWarnings("unchecked")
 	private void writeProperty(String key, Object value) {
-		if (value == null) {
-			writer.propertyNull(key);
-		} else if (value instanceof Map) {
+		if (value instanceof Map) {
 			writeMap(key, (Map<String, Object>) value);
 		} else if (value instanceof List) {
 			writeArray(key, (List<Object>) value);
@@ -47,57 +45,49 @@ public class MapToTHJSONConverter {
 	}
 
 	private void writeArray(String key, List<Object> array) {
-		writer.beginArray(key);
+		if (key != null) {
+			writer.property(key);
+		}
+		writer.beginList(null);
 		array.forEach(this::writeValue);
-		writer.endArray();
+		writer.endList();
 	}
 
 	private void writePrimitive(String key, Object prim) {
-		if (key == null) {
-			if (prim == null) {
-				writer.valueNull();
-			} else if (prim instanceof Boolean) {
-				writer.value(((Boolean) prim).booleanValue());
-			} else if (prim instanceof Number) {
-				Number num = (Number) prim;
-				if (num instanceof Float) {
-					writer.value(num.floatValue());
-				} else {
-					writer.value(num.intValue());
-				}
+		if (key != null) {
+			writer.property(key);
+		}
+		if (prim == null) {
+			writer.valueNull();
+		} else if (prim instanceof Boolean) {
+			writer.value(((Boolean) prim).booleanValue());
+		} else if (prim instanceof Number) {
+			Number num = (Number) prim;
+			if (num instanceof Float) {
+				writer.value(num.floatValue());
 			} else {
-				writer.value(prim.toString());
+				writer.value(num.intValue());
 			}
 		} else {
-			if (prim == null) {
-				writer.propertyNull(key);
-			} else if (prim instanceof Boolean) {
-				writer.property(key, ((Boolean) prim).booleanValue());
-			} else if (prim instanceof Number) {
-				Number num = (Number) prim;
-				if (num instanceof Float) {
-					writer.property(key, num.floatValue());
-				} else {
-					writer.property(key, num.intValue());
-				}
-			} else {
-				writer.property(key, prim.toString());
-			}
+			writer.value(prim.toString());
 		}
 	}
 
 	private void writeMap(String key, Map<String, Object> object) {
+		if (key != null) {
+			writer.property(key);
+		}
 		if (object.containsKey("class")) {
 			String clazz = (String) object.get("class");
 			if ("array".equals(clazz)) {
 				String type = (String) object.get("type");
 				@SuppressWarnings("unchecked")
 				List<Object> elements = (List<Object>) object.get("elements");
-				writer.beginList(key, type);
+				writer.beginList(type);
 				elements.forEach(this::writeValue);
 				writer.endList();
 			} else {
-				writer.beginObject(key, clazz);
+				writer.beginObject(clazz);
 				object.entrySet().forEach(e -> {
 					if (!e.getKey().equals("class")) {
 						writeProperty(e.getKey(), e.getValue());
@@ -106,9 +96,9 @@ public class MapToTHJSONConverter {
 				writer.endObject();
 			}
 		} else {
-			writer.beginMap(key);
+			writer.beginObject(null);
 			object.entrySet().forEach(e -> writeProperty(e.getKey(), e.getValue()));
-			writer.endMap();
+			writer.endObject();
 		}
 	}
 

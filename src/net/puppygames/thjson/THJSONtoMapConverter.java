@@ -39,6 +39,20 @@ public class THJSONtoMapConverter implements THJSONListener {
 	}
 
 	@SuppressWarnings("unchecked")
+	private void addChild(Object newChild) {
+		if (current instanceof List) {
+			((List<Object>) current).add(newChild);
+		} else {
+			Map<String, Object> currentObject = (Map<String, Object>) current;
+			List<Object> children = (List<Object>) currentObject.get("children");
+			if (children == null) {
+				children = new ArrayList<>();
+				currentObject.put("children", children);
+			}
+			children.add(newChild);
+		}
+	}
+
 	@Override
 	public void beginObject(String key, String clazz) {
 		if (debug) {
@@ -46,12 +60,11 @@ public class THJSONtoMapConverter implements THJSONListener {
 		}
 		stack.push(current);
 		Map<String, Object> newCurrent = new LinkedHashMap<>();
-		((Map<String, Object>) current).put(key, newCurrent);
+		addChild(newCurrent);
 		current = newCurrent;
 		newCurrent.put("class", clazz);
 	}
 
-	@SuppressWarnings("unchecked")
 	@Override
 	public void beginObjectValue(String clazz) {
 		if (debug) {
@@ -59,7 +72,7 @@ public class THJSONtoMapConverter implements THJSONListener {
 		}
 		stack.push(current);
 		Map<String, Object> newCurrent = new LinkedHashMap<>();
-		((List<Object>) current).add(newCurrent);
+		addChild(newCurrent);
 		current = newCurrent;
 		newCurrent.put("class", clazz);
 	}
@@ -192,7 +205,6 @@ public class THJSONtoMapConverter implements THJSONListener {
 		current = newCurrent;
 	}
 
-	@SuppressWarnings("unchecked")
 	@Override
 	public void beginArrayValue() {
 		if (debug) {
@@ -200,7 +212,7 @@ public class THJSONtoMapConverter implements THJSONListener {
 		}
 		stack.push(current);
 		List<Object> newCurrent = new ArrayList<>();
-		((List<Object>) current).add(newCurrent);
+		addChild(newCurrent);
 		current = newCurrent;
 	}
 
@@ -225,7 +237,6 @@ public class THJSONtoMapConverter implements THJSONListener {
 		current = elements;
 	}
 
-	@SuppressWarnings("unchecked")
 	@Override
 	public void beginListValue(String clazz) {
 		if (debug) {
@@ -237,7 +248,7 @@ public class THJSONtoMapConverter implements THJSONListener {
 		Map<String, Object> array = new LinkedHashMap<>();
 		array.put("class", "array");
 		array.put("type", clazz);
-		((List<Object>) current).add(array);
+		addChild(array);
 
 		stack.push(array);
 
@@ -258,7 +269,6 @@ public class THJSONtoMapConverter implements THJSONListener {
 		current = newCurrent;
 	}
 
-	@SuppressWarnings("unchecked")
 	@Override
 	public void beginMapValue() {
 		if (debug) {
@@ -266,7 +276,7 @@ public class THJSONtoMapConverter implements THJSONListener {
 		}
 		stack.push(current);
 		Map<String, Object> newCurrent = new LinkedHashMap<>();
-		((List<Object>) current).add(newCurrent);
+		addChild(newCurrent);
 		current = newCurrent;
 	}
 

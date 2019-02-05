@@ -1,7 +1,5 @@
 package net.puppygames.thjson;
 
-import java.util.Map.Entry;
-
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -16,18 +14,18 @@ public class JSONtoTHJSONConverter {
 	}
 
 	public void write(JsonObject json) {
-		for (Entry<String, JsonElement> entry : json.entrySet()) {
-			writeProperty(entry.getKey(), entry.getValue());
-		}
+		writeValue(json);
 	}
 
 	private void writeProperty(String key, JsonElement value) {
-		if (value.isJsonNull()) {
-			writer.propertyNull(key);
-		} else if (value.isJsonObject()) {
+		if (value.isJsonObject()) {
 			writeMap(key, value.getAsJsonObject());
 		} else if (value.isJsonArray()) {
-			writeArray(key, value.getAsJsonArray());
+			if (key.equals("children")) {
+				return;
+			} else {
+				writeArray(key, value.getAsJsonArray());
+			}
 		} else {
 			writePrimitive(key, value.getAsJsonPrimitive());
 		}
@@ -46,67 +44,66 @@ public class JSONtoTHJSONConverter {
 	}
 
 	private void writeArray(String key, JsonArray array) {
-		writer.beginArray(key);
+		if (key != null) {
+			writer.property(key);
+		}
+		writer.beginList(null);
 		array.forEach(this::writeValue);
-		writer.endArray();
+		writer.endList();
 	}
 
 	private void writePrimitive(String key, JsonPrimitive prim) {
-		if (key == null) {
-			if (prim.isJsonNull()) {
-				writer.valueNull();
-			} else if (prim.isBoolean()) {
-				writer.value(prim.getAsBoolean());
-			} else if (prim.isNumber()) {
-				Number num = prim.getAsNumber();
-				if (num instanceof Float) {
-					writer.value(num.floatValue());
-				} else {
-					writer.value(num.intValue());
-				}
+		if (key != null) {
+			writer.property(key);
+		}
+		if (prim.isJsonNull()) {
+			writer.valueNull();
+		} else if (prim.isBoolean()) {
+			writer.value(prim.getAsBoolean());
+		} else if (prim.isNumber()) {
+			Number num = prim.getAsNumber();
+			if (num instanceof Float) {
+				writer.value(num.floatValue());
 			} else {
-				writer.value(prim.getAsString());
+				writer.value(num.intValue());
 			}
 		} else {
-			if (prim.isJsonNull()) {
-				writer.propertyNull(key);
-			} else if (prim.isBoolean()) {
-				writer.property(key, prim.getAsBoolean());
-			} else if (prim.isNumber()) {
-				Number num = prim.getAsNumber();
-				if (num instanceof Float) {
-					writer.property(key, num.floatValue());
-				} else {
-					writer.property(key, num.intValue());
-				}
-			} else {
-				writer.property(key, prim.getAsString());
-			}
+			writer.value(prim.getAsString());
 		}
 	}
 
 	private void writeMap(String key, JsonObject json) {
+		if (key != null) {
+			writer.property(key);
+		}
 		if (json.has("class")) {
 			String clazz = json.get("class").getAsString();
 			if ("array".equals(clazz)) {
 				String type = json.get("type").getAsString();
 				JsonArray elements = json.get("elements").getAsJsonArray();
-				writer.beginList(key, type);
+				writer.beginList(type);
 				elements.forEach(this::writeValue);
 				writer.endList();
 			} else {
-				writer.beginObject(key, clazz);
+				writer.beginObject(clazz);
 				json.entrySet().forEach(e -> {
 					if (!e.getKey().equals("class")) {
 						writeProperty(e.getKey(), e.getValue());
 					}
 				});
+				if (json.has("children")) {
+					writeArray(null, json.get("children").getAsJsonArray());
+				}
 				writer.endObject();
 			}
 		} else {
-			writer.beginMap(key);
+			writer.beginObject(null);
 			json.entrySet().forEach(e -> writeProperty(e.getKey(), e.getValue()));
-			writer.endMap();
+			if (json.has("children")) {
+				JsonArray children = json.get("children").getAsJsonArray();
+				children.forEach(this::writeValue);
+			}
+			writer.endObject();
 		}
 	}
 

@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 */
 package net.puppygames.thjson;
 
-import static net.puppygames.thjson.THJSONWriter.*;
+import static net.puppygames.thjson.THJSONWriter.escape;
 
 /**
  * Listen to the stream of symbols coming in from {@link THJSONReader}
@@ -39,86 +39,95 @@ import static net.puppygames.thjson.THJSONWriter.*;
 public interface THJSONListener {
 
 	/**
+	 * Called every time the tokenizer reads a new token
+	 * @param source The source identifier; may be null
+	 * @param line The line in the source
+	 * @param col The column in the source
+	 */
+	default void position(String source, int line, int col) {
+	}
+
+	/**
 	 * Called at the start. Generally we do not need to do anything therefore we provide a default implementation that does nothing.
 	 */
-	default void begin() {
+	default void begin() throws Exception {
 	}
 
 	/**
 	 * Called at the end. Generally we do not need to do anything therefore we provide a default implementation that does nothing.
 	 */
-	default void end() {
+	default void end() throws Exception {
 	}
 
 	/**
 	 * A map inside an object with the specified key. Maps are objects without a class.
 	 * @param key
 	 */
-	void beginMap(String key);
+	void beginMap(String key) throws Exception;
 
 	/**
-	 * A map inside an array
+	 * A map inside an array, or an anonymous child
 	 */
-	void beginMapValue();
+	void beginMapValue() throws Exception;
 
 	/**
 	 * An object inside an object with the specified key and class. Objects always have a "class"
 	 * @param key
 	 * @param clazz
 	 */
-	void beginObject(String key, String clazz);
+	void beginObject(String key, String clazz) throws Exception;
 
 	/**
-	 * An object with the specified class inside an array. Objects always have a "class"
+	 * An object with the specified class inside an array, or an anonymous child. Objects always have a "class"
 	 * @param clazz
 	 */
-	void beginObjectValue(String clazz);
+	void beginObjectValue(String clazz) throws Exception;
 
 	/**
 	 * End an object
 	 */
-	void endObject();
+	void endObject() throws Exception;
 
 	/**
 	 * End a map
 	 */
-	void endMap();
+	void endMap() throws Exception;
 
-	void beginArray(String key);
+	void beginArray(String key) throws Exception;
 
-	void beginArrayValue();
+	void beginArrayValue() throws Exception;
 
-	void beginList(String key, String clazz);
+	void beginList(String key, String clazz) throws Exception;
 
-	void beginListValue(String clazz);
+	void beginListValue(String clazz) throws Exception;
 
-	void endList();
+	void endList() throws Exception;
 
-	void endArray();
+	void endArray() throws Exception;
 
-	void value(int value, IntegerType type);
+	void value(int value, IntegerType type) throws Exception;
 
-	void value(String value, StringType type);
+	void value(String value, StringType type) throws Exception;
 
-	void value(byte[] value, StringType type);
+	void value(byte[] value, StringType type) throws Exception;
 
-	void value(boolean value);
+	void value(boolean value) throws Exception;
 
-	void value(float value);
+	void value(float value) throws Exception;
 
-	void nullValue();
+	void nullValue() throws Exception;
 
-	void property(String key, int value, IntegerType type);
+	void property(String key, int value, IntegerType type) throws Exception;
 
-	void property(String key, String value, StringType type);
+	void property(String key, String value, StringType type) throws Exception;
 
-	void property(String key, byte[] value, StringType type);
+	void property(String key, byte[] value, StringType type) throws Exception;
 
-	void property(String key, boolean value);
+	void property(String key, boolean value) throws Exception;
 
-	void property(String key, float value);
+	void property(String key, float value) throws Exception;
 
-	void nullProperty(String key);
+	void nullProperty(String key) throws Exception;
 
 	/**
 	 * A comment in the source. Generally we don't need to process comments, so this default implementation is a no-op
@@ -131,16 +140,18 @@ public interface THJSONListener {
 	/**
 	 * A directive in the source. Generally we don't need to process directives, so this default implementation is a no-op
 	 * @param text
+	 * @throws Exception if directive processing encounters an error
 	 */
-	default void directive(String text) {
+	default void directive(String text) throws Exception {
 	}
 
 	/**
 	 * A function in the source. The default implementation is to return the function back again, verbatim, escaped in quotes
 	 * @param text
 	 * @return a String; null will be interpreted as the thjson literal null
+	 * @throws Exception if function processing encounters an error
 	 */
-	default String function(String text) {
-		return "\"@" + escape(text) + "\"";
+	default String function(String text) throws Exception {
+		return "\"#" + escape(text) + "\"";
 	}
 }

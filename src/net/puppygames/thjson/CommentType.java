@@ -4,5 +4,5 @@ package net.puppygames.thjson;
  * Different sorts of comment
  */
 public enum CommentType {
-	HASH, SLASHSLASH, BLOCK
+	SLASHSLASH, BLOCK, INLINE /* inline comments are embedded in a line */
 }

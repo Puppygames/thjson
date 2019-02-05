@@ -59,21 +59,21 @@ public interface THJSONWriter {
 
 	void begin();
 
-	void beginMap(String key);
+	default void comment(String comment, CommentType type) {
+		// Default is to ignore comment output
+	}
 
-	void endMap();
+	void directive(String directive);
 
-	void beginObject(String key, String clazz);
+	void beginObject(String clazz);
 
 	void endObject();
 
-	void beginArray(String key);
-
-	void endArray();
-
-	void beginList(String key, String clazz);
+	void beginList(String clazz);
 
 	void endList();
+
+	void property(String key);
 
 	void value(boolean b);
 
@@ -83,18 +83,47 @@ public interface THJSONWriter {
 
 	void value(String s);
 
+	void value(byte[] bytes);
+
 	void valueNull();
-
-	void property(String key, boolean b);
-
-	void property(String key, int i);
-
-	void property(String key, float f);
-
-	void property(String key, String s);
-
-	void propertyNull(String key);
 
 	void end();
 
+	default void beginObject() {
+		beginObject(null);
+	}
+
+	default void beginList() {
+		beginList(null);
+	}
+
+	default void property(String key, int value) {
+		property(key);
+		value(value);
+	}
+
+	default void property(String key, boolean value) {
+		property(key);
+		value(value);
+	}
+
+	default void property(String key, float value) {
+		property(key);
+		value(value);
+	}
+
+	default void property(String key, String value) {
+		property(key);
+		value(value);
+	}
+
+	default void property(String key, byte[] value) {
+		property(key);
+		value(value);
+	}
+
+	default void propertyNull(String key) {
+		property(key);
+		valueNull();
+	}
 }

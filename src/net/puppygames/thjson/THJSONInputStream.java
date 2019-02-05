@@ -1,7 +1,7 @@
 package net.puppygames.thjson;
 
-import static java.lang.System.*;
-import static java.util.Objects.*;
+import static java.lang.System.arraycopy;
+import static java.util.Objects.requireNonNull;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -30,10 +30,10 @@ public class THJSONInputStream {
 	private boolean newLineNext;
 
 	/** Current line number, 1-based */
-	private int line;
+	private int line = 1;
 
 	/** Current column number, 1-based */
-	private int col;
+	private int col = 1;
 
 	/** Number of characters in read-ahead queue */
 	private int peekLength;
@@ -145,7 +145,7 @@ public class THJSONInputStream {
 		if (newLineNext) {
 			newLineNext = false;
 			line++;
-			col = 0;
+			col = 1;
 		}
 
 		int c;
@@ -169,7 +169,6 @@ public class THJSONInputStream {
 		} else {
 			col++;
 		}
-		// System.out.print((char) c);
 		return c;
 	}
 

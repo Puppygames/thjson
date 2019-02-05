@@ -2,7 +2,6 @@ package net.puppygames.thjson;
 
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
@@ -17,7 +16,7 @@ public class ReaderPerformanceTest {
 	public ReaderPerformanceTest() {
 	}
 
-	public void run() throws IOException {
+	public void run() throws Exception {
 		// RepeatingInputStream ris = new RepeatingInputStream(() -> THJSONTokenizerTest.class.getResourceAsStream("test2.thjson"), 100000);
 		RepeatingInputStream ris = new RepeatingInputStream(() -> {
 			try {

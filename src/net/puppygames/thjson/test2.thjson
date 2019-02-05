@@ -1,7 +1,16 @@
 	
-	@include "some resource" # for sure
-	@include some other directive//with this
-	@include some other directive
+	#include "some resource" // for sure
+	#include some other directive//with this
+	#include some other directive
+
+	{
+		anonymous: child
+		x: 5
+		{
+			nested: childthing
+		}
+	}
+	[1,2,3]
 
 	float: .1
   escapes: "Testing escapés\nLike a boss\tTabs too! \"Great\" isn't it"
@@ -23,31 +32,31 @@
 	
   spacesAndQuotésInClassNames: are_not_allowed { because: "we're cool" }
      
-  # This is a class called "clazz"
+// This is a class called "clazz"
   some_class_or_other:
      clazz {
 	    one: @reference# 12345
 	    two: 2,
      }
      
-  # comments are useful
-  # specify rate in requests/second
+// comments are useful
+// specify rate in requests/second
   "rate": 1000
 
   // maybe you prefer js style comments
   /* or if you feel old fashioned */
 
-  # key names do not need to be placed in quotes
+// key names do not need to be placed in quotes
   key: "value"
 
-  # you don't need quotes for strings
+// you don't need quotes for strings
   text: look ma, : \nno quotes!
   
-  # Unicode escapes are valid but only inside quoted strings
+// Unicode escapes are valid but only inside quoted strings
   unicodeEscapes: "Fingerspitzengéf\u00FChl is a German term.\nIt\u2019s pronounced as follows: [\u02C8f\u026A\u014B\u0250\u02CC\u0283p\u026Ats\u0259n\u0261\u0259\u02CCfy\u02D0l]"
 
-  # note that for quoteless strings everything up
-  # to the next line is part of the string!
+// note that for quoteless strings everything up
+// to the next line or a comma is part of the string!
   
   test:[@a, @b]
   
@@ -73,24 +82,24 @@
   	%10101010
   ]
 
-  # commas are optional
+// commas are optional
   commas:
   {
     one: 1
     two: 2
   }
 
-  # trailing commas are allowed
+// trailing commas are allowed
   trailing:
   {
     one: 1,
     two: @"1234 asdasds",
   }
 
-  # It does typed arrays too
+// It does typed arrays too
   typedarray: int [1, 2, 3, 4]
 
-  # multiline string
+// multiline string
   test34:'''  abcde  '''
   haiku:
     '''
@@ -100,6 +109,6 @@ JSON I love you.
         
     '''
 
-  # Obviously you can always use standard JSON syntax as well:
+// Obviously you can always use standard JSON syntax as well:
   favNumbers: [ 1, 2, 3, 6, 42 ]
   

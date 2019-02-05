@@ -32,8 +32,8 @@ POSSIBILITY OF SUCH DAMAGE.
 
 package net.puppygames.thjson;
 
-import static java.nio.charset.StandardCharsets.*;
-import static java.util.Objects.*;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.util.Objects.requireNonNull;
 
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
@@ -58,19 +58,19 @@ public class THJSONReader {
 	/** Allowed levels of function nesting */
 	public static final int MAX_RECURSION = 16;
 
-	public static void readResource(String resourceURL, THJSONListener listener) throws IOException {
+	public static void readResource(String resourceURL, THJSONListener listener) throws Exception {
 		URL url = THJSONReader.class.getResource(resourceURL);
 		URLConnection conn = url.openConnection();
 		new THJSONReader(conn.getInputStream(), listener).parse();
 	}
 
-	public static JsonObject convertToJSON(String resourceURL) throws IOException {
+	public static JsonObject convertToJSON(String resourceURL) throws Exception {
 		THJSONtoJSONConverter converter = new THJSONtoJSONConverter();
 		readResource(resourceURL, converter);
 		return converter.getJson();
 	}
 
-	public static Map<String, Object> convertToMap(String resourceURL) throws IOException {
+	public static Map<String, Object> convertToMap(String resourceURL) throws Exception {
 		THJSONtoMapConverter converter = new THJSONtoMapConverter();
 		converter.setDebug(true);
 		readResource(resourceURL, converter);
@@ -78,7 +78,7 @@ public class THJSONReader {
 	}
 
 	public static void main(String[] args) throws Exception {
-		JsonObject json = convertToJSON("test2.thjson");
+		JsonObject json = convertToJSON("test5.thjson");
 		StringWriter out = new StringWriter();
 		JsonWriter writer = new JsonWriter(out);
 		writer.setIndent("\t");
@@ -86,7 +86,12 @@ public class THJSONReader {
 		gson.toJson(json, writer);
 		writer.flush();
 		Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(out.getBuffer().toString()), null);
-		System.out.println(out.getBuffer().toString());
+		//System.out.println(out.getBuffer().toString());
+
+		THJSONWriter thjsonWriter = new SimpleTHJSONWriter();
+		JSONtoTHJSONConverter back = new JSONtoTHJSONConverter(thjsonWriter);
+		back.write(json);
+		System.out.println(thjsonWriter.toString());
 	}
 
 	private final THJSONTokenizer tokenizer;
@@ -97,14 +102,13 @@ public class THJSONReader {
 	/** Recursion level */
 	private final int recursionLevel;
 
-	/** Whether we got a root brace */
-	private boolean hasRootBrace;
-
-	/** Whether we got a member */
-	private boolean hasMember;
-
-	/** Whether we closed the root brace */
-	private boolean closedRootBrace;
+	/** Listens to the stream position */
+	private final PositionListener positionListener = new PositionListener() {
+		@Override
+		public void onPosition(String source, int line, int col) {
+			listener.position(source, line, col);
+		}
+	};
 
 	/**
 	 * C'tor
@@ -114,6 +118,7 @@ public class THJSONReader {
 	public THJSONReader(InputStream in, THJSONListener listener) {
 		tokenizer = new THJSONTokenizer(in);
 		this.listener = requireNonNull(listener, "listener cannot be null");
+		tokenizer.setListener(positionListener);
 		this.recursionLevel = 0;
 	}
 
@@ -129,10 +134,15 @@ public class THJSONReader {
 		}
 		tokenizer = new THJSONTokenizer(in);
 		this.listener = requireNonNull(listener, "listener cannot be null");
+		tokenizer.setListener(positionListener);
 		this.recursionLevel = recursionLevel;
 	}
 
-	public void parse() throws IOException {
+	public void setSource(String source) {
+		tokenizer.setSource(source);
+	}
+
+	public void parse() throws Exception {
 		listener.begin();
 
 		Token t;
@@ -143,36 +153,30 @@ public class THJSONReader {
 				continue;
 			}
 
-			// Only allowed one root brace, and only if we've not yet had a member definition
-			if (t == Token.OPEN_CURLY_BRACKET) {
-				if (hasRootBrace || hasMember) {
-					throw new IOException("Unexpected { at line " + tokenizer.getLine() + ":" + tokenizer.getCol());
-				}
-				hasRootBrace = true;
-				read();
-			} else if (t == Token.CLOSE_CURLY_BRACKET) {
-				if (!hasRootBrace || closedRootBrace) {
-					throw new IOException("Unexpected } at line " + tokenizer.getLine() + ":" + tokenizer.getCol());
-				}
-				closedRootBrace = true;
-				read();
-			} else if (t.getType() == TokenType.DIRECTIVE) {
+			if (t.getType() == TokenType.DIRECTIVE) {
 				read();
 				listener.directive(t.getString());
 			} else if (t.getType() == TokenType.STRING) {
-				// Reading a root-level property:value
-				readMember(true);
+				readMember();
+			} else if (t == Token.OPEN_ROUND_BRACKET) {
+				// Anonymous child object with class
+				readMember();
+			} else if (t == Token.OPEN_CURLY_BRACKET) {
+				// Anonymous child map
+				readMember();
+			} else if (t == Token.OPEN_SQUARE_BRACKET) {
+				// Anonymous child array
+				readMember();
 			} else {
-				throw new IOException("Unexpected token " + t + " at line " + tokenizer.getLine() + ":" + tokenizer.getCol());
+				throw new IOException(exceptionMessage("Unexpected token " + t));
 			}
-
-		}
-
-		if (hasRootBrace && !closedRootBrace) {
-			throw new EOFException("Unexpected EOF at line " + tokenizer.getLine() + ":" + tokenizer.getCol());
 		}
 
 		listener.end();
+	}
+
+	private String exceptionMessage(String message) {
+		return message + " at line " + tokenizer.getLine() + ":" + tokenizer.getCol() + (tokenizer.getSource() == null ? "" : " in " + tokenizer.getSource());
 	}
 
 	/**
@@ -195,16 +199,14 @@ public class THJSONReader {
 
 	private void ensureNotEOF(Token t, String message) throws EOFException {
 		if (t == Token.EOF) {
-			throw new EOFException("Unexpected EOF " + message + " at line " + tokenizer.getLine() + ":" + tokenizer.getCol());
+			throw new EOFException(exceptionMessage("Unexpected EOF " + message));
 		}
 	}
 
 	private boolean consumeComment(Token t) throws IOException {
 		if (t.getType().isComment()) {
 			read();
-			if (t.getType() == TokenType.HASH_COMMENT) {
-				listener.comment(t.getString(), CommentType.HASH);
-			} else if (t.getType() == TokenType.SLASHSLASH_COMMENT) {
+			if (t.getType() == TokenType.SLASHSLASH_COMMENT) {
 				listener.comment(t.getString(), CommentType.SLASHSLASH);
 			} else if (t.getType() == TokenType.BLOCK_COMMENT) {
 				listener.comment(t.getString(), CommentType.BLOCK);
@@ -215,7 +217,7 @@ public class THJSONReader {
 		}
 	}
 
-	private void emitProperty(String key, Token value) {
+	private void emitProperty(String key, Token value) throws Exception {
 		switch (value.getType()) {
 			case BINARY:
 				listener.property(key, value.getInteger(), IntegerType.BINARY);
@@ -257,7 +259,7 @@ public class THJSONReader {
 		value = null;
 	}
 
-	private void emitValue(Token value) {
+	private void emitValue(Token value) throws Exception {
 		switch (value.getType()) {
 			case BINARY:
 				listener.value(value.getInteger(), IntegerType.BINARY);
@@ -306,7 +308,7 @@ public class THJSONReader {
 		return tokenizer.read();
 	}
 
-	private void readMapOrObject() throws IOException {
+	private void readMapOrObject() throws Exception {
 		Token t;
 
 		for (;;) {
@@ -323,11 +325,11 @@ public class THJSONReader {
 			}
 
 			// Otherwise, read member
-			readMember(false);
+			readMember();
 		}
 	}
 
-	private void readMember(boolean root) throws IOException {
+	private void readMember() throws Exception {
 		Token t;
 		for (;;) {
 			t = peek(0);
@@ -336,12 +338,21 @@ public class THJSONReader {
 				continue;
 			}
 			if (t == Token.CLOSE_CURLY_BRACKET) {
-				// Finished here
+				// End of object
 				return;
 			}
-			String key = readKey(root);
-			readColon();
-			readMemberValue(key);
+
+			if (t == Token.OPEN_ROUND_BRACKET) {
+				// Child with class name - pass in a null key
+				readMemberValue(null);
+			} else if (t == Token.OPEN_CURLY_BRACKET || t == Token.OPEN_SQUARE_BRACKET) {
+				// Anonymous child - pass in a null key
+				readMemberValue(null);
+			} else {
+				String key = readKey();
+				readColon();
+				readMemberValue(key);
+			}
 
 			// Optionally consume up to one comma token
 			readComments();
@@ -379,20 +390,39 @@ public class THJSONReader {
 				read();
 				return;
 			}
-			throw new IOException("Expected colon value but got " + t + " at line " + tokenizer.getLine() + ":" + tokenizer.getCol());
+			throw new IOException(exceptionMessage("Expected colon value but got " + t));
 		}
 	}
 
-	private String readKey(boolean root) throws IOException {
+	private String readKey() throws IOException {
 		Token t = read();
 		// Expect a string, followed by a colon
 		if (t.getType() != TokenType.STRING) {
-			throw new IOException("Expected key value but got " + t + " at line " + tokenizer.getLine() + ":" + tokenizer.getCol());
+			throw new IOException(exceptionMessage("Expected key value but got " + t));
 		}
 		return t.getString();
 	}
 
-	private void readMemberValue(String key) throws IOException {
+	private String readClass() throws IOException {
+		Token t = read();
+		// Expect ( string )
+		if (t != Token.OPEN_ROUND_BRACKET) {
+			throw new IOException(exceptionMessage("Expected ( but got " + t));
+		}
+		t = read();
+		if (t.getType() != TokenType.STRING) {
+			throw new IOException(exceptionMessage("Expected classname but got " + t));
+		}
+		String ret = t.getString();
+		t = read();
+		if (t != Token.CLOSE_ROUND_BRACKET) {
+			throw new IOException(exceptionMessage("Expected ) but got " + t));
+		}
+		readComments();
+		return ret;
+	}
+
+	private void readMemberValue(String key) throws Exception {
 		// Either a literal, or a string followed by { (an object), or a { (a map), or a string followed by a [ (a list), or a [ (an array)
 		Token t;
 		for (;;) {
@@ -412,34 +442,60 @@ public class THJSONReader {
 				return;
 			} else if (t == Token.OPEN_CURLY_BRACKET) {
 				read();
-				listener.beginMap(key);
+				if (key == null) {
+					listener.beginMapValue();
+				} else {
+					listener.beginMap(key);
+				}
 				readMapOrObject();
 				listener.endMap();
 				return;
 			} else if (t == Token.OPEN_SQUARE_BRACKET) {
 				read();
-				listener.beginArray(key);
+				if (key == null) {
+					listener.beginArrayValue();
+				} else {
+					listener.beginArray(key);
+				}
 				readArray();
 				listener.endArray();
 				return;
-			} else if (t.getType() == TokenType.STRING && tokenizer.peek(1) == Token.OPEN_CURLY_BRACKET) {
-				read();
-				read();
-				listener.beginObject(key, t.getString());
-				readMapOrObject();
-				listener.endObject();
+			} else if (t == Token.OPEN_ROUND_BRACKET) {
+				String className = readClass();
+				t = read();
+				if (t == Token.OPEN_CURLY_BRACKET) {
+					// Class
+					if (key == null) {
+						listener.beginObjectValue(className);
+					} else {
+						listener.beginObject(key, className);
+					}
+					readMapOrObject();
+					listener.endObject();
+				} else if (t == Token.OPEN_SQUARE_BRACKET) {
+					// List
+					if (key == null) {
+						listener.beginListValue(className);
+					} else {
+						listener.beginList(key, className);
+					}
+					readArray();
+					listener.endList();
+					return;
+				} else {
+					throw new IOException(exceptionMessage("Expected { or [ " + t));
+				}
 				return;
-			} else if (t.getType() == TokenType.STRING && tokenizer.peek(1) == Token.OPEN_SQUARE_BRACKET) {
-				read();
-				read();
-				listener.beginList(key, t.getString());
-				readArray();
-				listener.endList();
-				return;
+
 			} else if (t.getType() == TokenType.DIRECTIVE) {
 				// Function call
 				read();
-				String result = listener.function(t.getString());
+				String result;
+				try {
+					result = listener.function(t.getString());
+				} catch (Exception e) {
+					throw new IOException(exceptionMessage("Error processing function " + t), e);
+				}
 				if (result == null) {
 					result = "null";
 				} else {
@@ -449,7 +505,9 @@ public class THJSONReader {
 				new THJSONReader(new ByteArrayInputStream(result.getBytes(UTF_8)), listener, recursionLevel + 1).readMemberValue(key);
 				return;
 			} else if (!t.getType().isLiteral() && !(t.getType() == TokenType.STRING || t.getType() == TokenType.MULTILINE_STRING || t.getType() == TokenType.BYTES || t.getType() == TokenType.MULTILINE_BYTES)) {
-				throw new IOException("Unexpected " + t + " when expecting literal or string or bytes value at line " + tokenizer.getLine() + ":" + tokenizer.getCol());
+				throw new IOException(exceptionMessage("Unexpected " + t + " when expecting literal or string or bytes value"));
+			} else if (key == null) {
+				throw new IOException(exceptionMessage("Unexpected " + t));
 			}
 
 			read();
@@ -458,7 +516,7 @@ public class THJSONReader {
 		}
 	}
 
-	private void readArray() throws IOException {
+	private void readArray() throws Exception {
 		Token t;
 		for (;;) {
 			t = tokenizer.peek(0);
@@ -478,7 +536,7 @@ public class THJSONReader {
 		}
 	}
 
-	private void readArrayValue() throws IOException {
+	private void readArrayValue() throws Exception {
 		// Either a literal, or a string followed by { (an object), or a { (a map), or a string followed by a [ (a list), or a [ (an array)
 		Token t;
 		for (;;) {
@@ -508,24 +566,30 @@ public class THJSONReader {
 				readArray();
 				listener.endArray();
 				return;
-			} else if (t.getType() == TokenType.STRING && tokenizer.peek(1) == Token.OPEN_CURLY_BRACKET) {
-				read();
-				read();
-				listener.beginObjectValue(t.getString());
-				readMapOrObject();
-				listener.endObject();
-				return;
-			} else if (t.getType() == TokenType.STRING && tokenizer.peek(1) == Token.OPEN_SQUARE_BRACKET) {
-				read();
-				read();
-				listener.beginListValue(t.getString());
-				readArray();
-				listener.endList();
+			} else if (t == Token.OPEN_ROUND_BRACKET) {
+				String className = readClass();
+				t = read();
+				if (t == Token.OPEN_CURLY_BRACKET) {
+					listener.beginObjectValue(className);
+					readMapOrObject();
+					listener.endObject();
+				} else if (t == Token.OPEN_SQUARE_BRACKET) {
+					listener.beginListValue(className);
+					readArray();
+					listener.endList();
+				} else {
+					throw new IOException(exceptionMessage("Expected { or [ but got " + t));
+				}
 				return;
 			} else if (t.getType() == TokenType.DIRECTIVE) {
 				// Function call
 				read();
-				String result = listener.function(t.getString());
+				String result;
+				try {
+					result = listener.function(t.getString());
+				} catch (Exception e) {
+					throw new IOException(exceptionMessage("Error processing function " + t), e);
+				}
 				if (result == null) {
 					result = "null";
 				} else {
@@ -535,7 +599,7 @@ public class THJSONReader {
 				new THJSONReader(new ByteArrayInputStream(result.getBytes(UTF_8)), listener, recursionLevel + 1).readArrayValue();
 				return;
 			} else if (!t.getType().isLiteral() && !(t.getType() == TokenType.STRING || t.getType() == TokenType.MULTILINE_STRING || t.getType() == TokenType.BYTES || t.getType() == TokenType.MULTILINE_BYTES)) {
-				throw new IOException("Unexpected " + t + " when expecting literal or string value at line " + tokenizer.getLine() + ":" + tokenizer.getCol());
+				throw new IOException(exceptionMessage("Unexpected " + t + " when expecting literal or string value"));
 			}
 
 			read();
