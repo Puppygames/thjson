@@ -43,9 +43,9 @@ they deal a whole lot in classes.
 Enter THJSON.
 
 THJSON looks almost exactly like HJSON - it is in fact a superset of HJSON, which itself is a superset of JSON. The extra
-bit is the addition of a class name before a map (maps are objects that are enclosed in {} parentheses):
+bit is the addition of a class name in round brackets before a map (maps are objects that are enclosed in {} parentheses):
 
-    left_hand: sword {
+    left_hand: (sword) {
         damage: 3
         weight: 1kg
     }
@@ -56,7 +56,7 @@ instead a class, of a type name which is the string so far. No whitespace is all
 We can do the same for arrays - define a class type for the array. We don't actually check that the elements themselves
 conform to the type - indeed we don't do anything with the class type name other than pass it to the stream listener:
 
-    inventory: item [sword, axe, shoes, tea, "no tea"]
+    inventory: (item) [sword, axe, shoes, tea, "no tea"]
     
 In the git repository there's an example listener that converts the stream of tokens into a Google Json object. Classes
 are converted into JSON objects by simply creating a property called "class":
@@ -101,3 +101,24 @@ Or if you've got a lot of binary data, you can use multiline - but be aware ther
 	  0123456789+/
 	  >>>
 
+THJSON allows things called directives in it, which are outside of the normal data definition and can be used to trigger things during parsing. Directives must be at the root level in the document hierarchy, begin with a #, and are a single string keyword, followed by any tokens up to a newline. Some examples which might tickle your fancy:
+
+	#define sausages	100
+	#include some/resource.thjson
+	#fielddef thingy { type: string, mandatory: true }
+
+Yes, that's right, you can implement a C style preprocessor in your token listener! (I've done it, it's quite complex to do right, but it works great).
+
+Finally, it is valid THJSON syntax to include anonymous maps, objects, and arrays, inside another object or map. Or even at the root. So this is fine:
+
+	inventory: (backpack) 
+	  {
+ 	    (sword) { damage: 1 }
+ 	    (axe) { damage: 2 }
+ 	    (potion} { health: 3 }
+	    {
+		// An empty Map			
+	    }
+	  }
+
+The listener will return anonymous objects in the order that they are encountered.
